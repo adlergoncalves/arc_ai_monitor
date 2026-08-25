@@ -8,8 +8,11 @@
  *  2. o cache que o proprio Claude Code grava em `~/.claude.json`, quando a
  *     consulta falha, o token expirou ou a rede caiu.
  *
- * O token sai de `~/.claude/.credentials.json` e NUNCA e reescrito aqui: se
- * expirar, caimos no cache em vez de tentar renovar.
+ * O token sai de `~/.claude/.credentials.json` ou, quando esse arquivo nao
+ * existe (padrao no macOS), do Keychain — o Claude Code usa um ou outro
+ * conforme a plataforma, com o MESMO formato de JSON. Em nenhum dos dois
+ * casos ele e reescrito aqui: se expirar, caimos no cache em vez de tentar
+ * renovar.
  *
  * O resultado da consulta e compartilhado entre todas as janelas do VS
  * Code, num arquivo em ~/.claude com lock. Sem isso, tres janelas abertas
@@ -17,12 +20,15 @@
  * `429 rate_limit_error` e todo mundo ficaria preso ao cache. Com o cache
  * compartilhado, N janelas geram no maximo uma consulta por TTL.
  */
+import { execFile } from 'child_process';
 import * as fs from 'fs/promises';
 import * as https from 'https';
 import { CONFIG_FILE, CREDS_FILE, QUOTA_CACHE, QUOTA_LOCK } from './paths';
 import { Account, QuotaBar, Spend } from './types';
 
 const QUOTA_URL = 'https://api.anthropic.com/api/oauth/usage';
+/** item do Keychain (macOS) onde o Claude Code guarda o mesmo JSON do arquivo */
+const KEYCHAIN_SERVICE = 'Claude Code-credentials';
 /** apos erro/429, recua progressivamente ate 15min */
 const BACKOFF_MAX_MS = 900_000;
 /** lock abandonado (processo morreu no meio) vira lixo depois disso */
@@ -377,20 +383,65 @@ export class QuotaReader {
   }
 }
 
-async function readToken(): Promise<{ accessToken: string; subscriptionType?: string } | undefined> {
+interface Token {
+  accessToken: string;
+  subscriptionType?: string;
+}
+
+/**
+ * O payload e o MESMO nos dois lugares (arquivo ou Keychain): um JSON com
+ * `claudeAiOauth`. So muda de onde o texto vem.
+ */
+function parseToken(raw: string): Token | undefined {
+  let data: any;
   try {
-    const raw = JSON.parse(await fs.readFile(CREDS_FILE, 'utf8'));
-    const oa = raw?.claudeAiOauth;
-    if (!oa?.accessToken) {
-      return undefined;
-    }
-    if (typeof oa.expiresAt === 'number' && oa.expiresAt <= Date.now()) {
-      return undefined; // expirado: nao renovamos, cai para o cache
-    }
-    return { accessToken: oa.accessToken, subscriptionType: oa.subscriptionType };
+    data = JSON.parse(raw);
   } catch {
     return undefined;
   }
+  const oa = data?.claudeAiOauth;
+  if (!oa?.accessToken) {
+    return undefined;
+  }
+  if (typeof oa.expiresAt === 'number' && oa.expiresAt <= Date.now()) {
+    return undefined; // expirado: nao renovamos, cai para o cache
+  }
+  return { accessToken: oa.accessToken, subscriptionType: oa.subscriptionType };
+}
+
+/**
+ * Le o item que o Claude Code guarda no Keychain do macOS. E o unico lugar
+ * onde o token existe quando `.credentials.json` nao foi escrito — caso
+ * comum no macOS. Somente leitura, como o arquivo: nunca reescrevemos.
+ */
+function readKeychainToken(): Promise<Token | undefined> {
+  return new Promise((resolve) => {
+    if (process.platform !== 'darwin') {
+      resolve(undefined);
+      return;
+    }
+    execFile(
+      'security',
+      ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'],
+      { timeout: 8000, maxBuffer: 1024 * 1024 },
+      (err, stdout) => {
+        // item ausente, Keychain trancado ou acesso negado: cai para o cache
+        resolve(err ? undefined : parseToken(stdout.trim()));
+      },
+    );
+  });
+}
+
+async function readToken(): Promise<Token | undefined> {
+  try {
+    const fromFile = parseToken(await fs.readFile(CREDS_FILE, 'utf8'));
+    if (fromFile) {
+      return fromFile;
+    }
+  } catch {
+    // arquivo ausente: no macOS o token mora no Keychain
+  }
+  return readKeychainToken();
 }
 
 function httpGet(url: string, headers: Record<string, string>): Promise<string> {

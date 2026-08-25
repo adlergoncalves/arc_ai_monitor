@@ -32,10 +32,11 @@ lateral secundária (direita) — onde ficar melhor.
 
 **Cotas** são os valores **oficiais** — os mesmos do `/usage`. Vêm de
 `api.anthropic.com/api/oauth/usage`, usando o token que o Claude Code já
-mantém em `~/.claude/.credentials.json`. Esse endpoint **não faz inferência**:
-não gasta tokens nem consome cota. O arquivo de credenciais é **só lido, nunca
-reescrito**; se o token expirar ou a rede cair, o painel volta sozinho ao cache
-local (`~/.claude.json`).
+mantém: `~/.claude/.credentials.json` quando esse arquivo existe (Windows) ou,
+quando não existe, o Keychain do sistema (macOS). Esse endpoint **não faz
+inferência**: não gasta tokens nem consome cota. As credenciais são **só
+lidas, nunca reescritas**; se o token expirar ou a rede cair, o painel volta
+sozinho ao cache local (`~/.claude.json`).
 
 O intervalo entre consultas (padrão 150s) é respeitado **entre todas as
 janelas do VS Code** — o resultado é compartilhado em
@@ -87,6 +88,16 @@ Na aba **Extensions** (`Ctrl+Shift+X`), busque **Arc AI Monitor** e instale.
 
 Requisito: **Claude Code instalado e logado** na máquina — é de lá que saem
 todos os dados.
+
+### Compatibilidade
+
+| Sistema | Token da conta |
+|---------|----------------|
+| **Windows** | `~/.claude/.credentials.json` |
+| **macOS** | Keychain (o Claude Code não grava o arquivo de credenciais) |
+
+No macOS, a primeira consulta pode abrir **um pedido de autorização do
+Keychain** — é esperado, e acontece só uma vez.
 
 ## Configuração
 

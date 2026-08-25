@@ -2,13 +2,16 @@
   "name": "arc-ai-monitor",
   "displayName": "Arc AI Monitor",
   "description": "Monitor de uso do Claude Code dentro do VS Code: cotas oficiais da conta, sessoes ativas e consumo do dia. Le arquivos locais, nao gasta tokens.",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "publisher": "AdlerGoncalves",
   "author": {
     "name": "Adler Gonçalves"
   },
-  "private": true,
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/adlergoncalves/arc_ai_monitor.git"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
