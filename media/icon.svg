@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor">
+  <!-- reator: anel de 10 bobinas (dasharray fecha a circunferencia de r=8.4)
+       + nucleo. Mesma identidade do painel, legivel a 24px. -->
+  <circle cx="12" cy="12" r="8.4" stroke-width="2.4" stroke-dasharray="3.6 1.68" stroke-linecap="butt"/>
+  <circle cx="12" cy="12" r="3.1" fill="currentColor" stroke="none"/>
+</svg>

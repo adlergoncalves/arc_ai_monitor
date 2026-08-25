@@ -1,0 +1,782 @@
+/* Paleta padrão Apple dark: quase-preto, cinzas do sistema e UMA cor viva —
+   a menta técnica, identidade do monitor. Severidade troca número e filete
+   para âmbar/vermelho; nada mais muda de cor.
+
+   A ESTRUTURA é de painel: cartões emoldurados com cabeçalho, gráficos com
+   eixo e gridline, tipografia monoespaçada nos rótulos. */
+:root {
+  --ground:  #0b0b0d;   /* quase-preto, base */
+  --panel:   #101012;   /* moldura de painel, um degrau acima do fundo */
+  --card:    #1c1c1e;   /* systemGray6 dark — tiles e linhas de sessão */
+  --line:    #2c2c2e;   /* separador e trilha */
+  --grid:    #1e1e20;   /* gridline de gráfico: existe, mas não disputa */
+  --ink:     #f5f5f7;
+  --ink-mid: #98989f;
+  --ink-dim: #636368;
+
+  --accent:     #3ddc97;   /* menta técnica */
+  --accent-dim: #2aa873;
+  --accent-lo:  #1f6b4b;
+  --accent-hi:  #9beac4;
+  --coil-off:   #22322b;   /* bobina apagada do reator */
+
+  --warn: #e0a94a;
+  --crit: #e5533d;
+
+  /* ritmo do reator; o JS sobrescreve conforme a atividade real */
+  --spin: 9.72s;
+  --breath: 4.89s;
+  --glow: 0.28;
+
+  --mono: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+  --sans: "Segoe UI", Roboto, system-ui, sans-serif;
+
+  --r: 10px;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; padding: 0; }
+
+body {
+  background: var(--ground);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+}
+
+.shell {
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 12px 14px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Topo ────────────────────────────────────────────────────────────── */
+.top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 2px;
+}
+.wordmark {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.fresh,
+.count,
+.top .who {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+.top .who {
+  max-width: 32ch;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.top .sep { color: var(--line); font-size: 0.625rem; }
+.fresh.live { color: var(--accent); }
+.fresh.old  { color: var(--warn); }
+.top .spacer { flex: 1; }
+.topmeta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+/* ── Reator arc ──────────────────────────────────────────────────────────
+   Núcleo respirando + 10 bobinas acendendo em sequência. Parado gira devagar
+   (~9,7s por volta); com sessão gerando token acelera para ~1,7s. Os dois
+   ritmos são calculados pelo JS conforme a atividade real e entregues em
+   --spin e --breath. */
+.core { width: 24px; height: 24px; flex: none; overflow: visible; }
+.core .ring {
+  fill: none;
+  stroke: var(--accent-dim);
+  stroke-width: 2.5;
+  opacity: 0.62;
+}
+.core .coil {
+  fill: none;
+  stroke: var(--coil-off);
+  stroke-width: 14;
+  animation: coil var(--spin) linear infinite;
+  animation-delay: calc((var(--i) * var(--spin) / 10) - var(--spin));
+}
+/* a posicao de cada bobina na sequencia (o atributo style inline seria
+   barrado pela CSP, entao o indice mora aqui) */
+.core .coil:nth-of-type(1)  { --i: 0; }
+.core .coil:nth-of-type(2)  { --i: 1; }
+.core .coil:nth-of-type(3)  { --i: 2; }
+.core .coil:nth-of-type(4)  { --i: 3; }
+.core .coil:nth-of-type(5)  { --i: 4; }
+.core .coil:nth-of-type(6)  { --i: 5; }
+.core .coil:nth-of-type(7)  { --i: 6; }
+.core .coil:nth-of-type(8)  { --i: 7; }
+.core .coil:nth-of-type(9)  { --i: 8; }
+.core .coil:nth-of-type(10) { --i: 9; }
+
+/* acesa no pico, apagando em ~1,5 bobina para cada lado. Janela mais larga
+   (26%) deixava metade do anel meio-acesa ao mesmo tempo — a 24px isso lia
+   como borrão girando, não como sequência. */
+@keyframes coil {
+  0%   { stroke: var(--accent); }
+  14%  { stroke: var(--coil-off); }
+  86%  { stroke: var(--coil-off); }
+  100% { stroke: var(--accent); }
+}
+.core .pit {
+  fill: #94ecc6;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: breathe var(--breath) ease-in-out infinite;
+}
+@keyframes breathe {
+  0%, 100% { transform: scale(1);    fill: #94ecc6; }
+  50%      { transform: scale(1.21); fill: #c5f4e0; }
+}
+/* halo de 1px, não 2.5: num desenho de 24px o sombreado largo borrava anel,
+   bobinas e núcleo juntos — o glow tem que sugerir energia, não desfocar */
+.core { filter: drop-shadow(0 0 1px rgba(61, 220, 151, var(--glow))); }
+
+/* ── Painel ──────────────────────────────────────────────────────────── */
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 12px 14px 14px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.panel > h2 {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 10px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--ink-mid);
+  min-width: 0;
+}
+.panel > h2 .who {
+  font-weight: 400;
+  font-size: 0.625rem;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Sem align-items:start: os painéis da mesma linha se ESTICAM à mesma altura.
+   É a regra que mata os degraus — cartão de sessão novo faz a linha inteira
+   crescer junto, em vez de deixar o vizinho pendurado com buraco embaixo. */
+.grid-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr);
+  gap: 10px;
+}
+.grid-hist {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+}
+@media (max-width: 1000px) {
+  .grid-main,
+  .grid-hist { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* ── Faixa de KPI ────────────────────────────────────────────────────────
+   Cota e consumo com o mesmo peso: é a linha que se lê de relance. Teto de
+   200px por tile — esticado por 460px o número vira um ponto no canto de um
+   retângulo vazio e o filete da base some de tão comprido. */
+/* auto-fit 1fr: a linha preenche a largura TODA, sem cauda vazia à direita —
+   era o maior buraco do layout anterior (tiles tetados em 200px). Com 7
+   tiles numa tela de 1500px cada um fica com ~205px; numa ultrawide crescem
+   juntos, proporcionais. */
+.kpis {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+}
+/* as cotas entram pelo JS com order 0..3; sem uma ordem alta aqui, os tiles
+   fixos (order padrão 0) furariam a fila e apareceriam antes delas */
+#q-empty { order: -1; }
+#k_out  { order: 10; }
+#k_mov  { order: 11; }
+#k_cost { order: 12; }
+.q,
+.k {
+  position: relative;
+  background: var(--card);
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  padding: 8px 11px 15px;
+  min-height: 72px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.k { padding-bottom: 10px; }
+.q .qnum,
+.k .knum {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  line-height: 1;
+  margin-bottom: auto;
+}
+.q .qnum b,
+.k .knum b {
+  font-size: 1.55rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.q .qnum i,
+.k .knum i {
+  font-style: normal;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--ink-dim);
+  padding-top: 3px;
+}
+.q .qlbl,
+.k .klbl {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--ink-mid);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 7px;
+}
+.q .qfoot,
+.k .kfoot {
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* filete de progresso na base — só a cota tem nível */
+.q .qfil {
+  position: absolute;
+  left: 11px;
+  right: 11px;
+  bottom: 7px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--line);
+  overflow: hidden;
+}
+.q .qfil i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width .6s cubic-bezier(.22, 1, .36, 1);
+}
+.q.warning  .qnum b { color: var(--warn); }
+.q.warning  .qfil i { background: var(--warn); }
+.q.warning  { border-color: rgba(224, 169, 74, .35); }
+.q.critical .qnum b { color: var(--crit); }
+.q.critical .qfil i { background: var(--crit); }
+.q.critical { border-color: rgba(229, 83, 61, .45); }
+
+/* ── Gráficos ────────────────────────────────────────────────────────── */
+/* Altura FIXA + preserveAspectRatio="none": o viewBox estica na horizontal e
+   o gráfico ocupa a largura que tiver. Com height:auto, um painel de 700px
+   daria um gráfico de 200px de altura, que engoliria o painel. */
+.chart { width: 100%; }
+.chart svg { display: block; width: 100%; height: 96px; overflow: visible; }
+body.compact .chart svg { height: 76px; }
+
+.gridline { stroke: var(--grid); stroke-width: 1; }
+.axisline { stroke: var(--line); stroke-width: 1; }
+/* média do período: referência tracejada, presente sem competir */
+.refline {
+  stroke: var(--ink-dim);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: .55;
+}
+.area { fill: url(#gradAccent); }
+.spark-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 1.75;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.dot { fill: var(--accent); stroke: var(--panel); stroke-width: 2; }
+.vline { stroke: var(--accent); stroke-width: 1; opacity: .45; stroke-dasharray: 2 2; }
+.bar { fill: var(--accent-dim); }
+.bar.zero { fill: var(--line); }
+.bar.today { fill: var(--accent); }
+/* faixa invisível de captura: a curva é fina demais para servir de alvo */
+.hit { fill: transparent; cursor: default; }
+.bar:hover { fill: var(--accent-hi); }
+
+.axis {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Composição: radial + tabela ─────────────────────────────────────────
+   Com 98,5% num segmento só, barra empilhada vira uma linha lisa: a
+   informação fica só na legenda. O número é que é a notícia. */
+/* margin-top:auto: quando a linha estica o painel além do conteúdo, a folga
+   fica ENTRE o gráfico e a composição — espaço distribuído lê como respiro;
+   um buraco no fim do painel lê como erro. */
+.comp {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.axis { margin-bottom: 12px; }
+.gauge { width: 84px; height: 84px; flex: none; position: relative; }
+.gauge svg { display: block; width: 100%; height: 100%; }
+.gauge .track { fill: none; stroke: var(--line); stroke-width: 9; }
+.gauge .fill {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 9;
+  stroke-linecap: round;
+  transition: stroke-dasharray .6s cubic-bezier(.22, 1, .36, 1);
+}
+.gauge .gnum {
+  fill: var(--ink);
+  font-family: var(--sans);
+  font-size: 17px;
+  font-weight: 700;
+  text-anchor: middle;
+}
+.gauge .glbl {
+  fill: var(--ink-dim);
+  font-family: var(--mono);
+  font-size: 7px;
+  text-anchor: middle;
+  letter-spacing: .08em;
+}
+.ctable {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.crow {
+  display: grid;
+  grid-template-columns: 9px minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-mid);
+}
+.crow em {
+  width: 7px;
+  height: 7px;
+  border-radius: 2px;
+  display: block;
+}
+.crow .cv { color: var(--ink); }
+.crow .cp { color: var(--ink-dim); min-width: 5ch; text-align: right; }
+.crow .sw-cr { background: var(--accent-lo); }
+.crow .sw-cw { background: var(--accent-dim); }
+.crow .sw-o  { background: var(--accent); }
+.crow .sw-i  { background: var(--accent-hi); }
+
+/* ── Ranking ─────────────────────────────────────────────────────────────
+   flex:1 + rolagem: o painel acompanha a altura da linha (dada pelo gráfico
+   de 30 dias ao lado) e uma lista longa rola em vez de esticar a página. */
+.rank {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.rrow { min-width: 0; }
+.rtop {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-variant-numeric: tabular-nums;
+}
+.rtop .rn {
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.rtop .rv { color: var(--ink-dim); flex: none; }
+.rb {
+  display: block;
+  height: 5px;
+  margin-top: 4px;
+  background: var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.rb i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent-dim);
+  transition: width .5s cubic-bezier(.22, 1, .36, 1);
+}
+.rrow:first-child .rb i { background: var(--accent); }
+
+.hscale {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 5px;
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Sessões ─────────────────────────────────────────────────────────────
+   O painel absorve crescimento: até ~4 fileiras de cartões ele acompanha, e
+   além disso rola POR DENTRO — sessão nova nunca empurra o resto da página.
+   flex:1 faz a grade ocupar a altura que o stretch da linha deu ao painel. */
+.sessions {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+  /* as fileiras DIVIDEM a altura que o stretch deu ao painel: com uma só,
+     os cartões crescem até o fundo; com duas, repartem; nunca menores que o
+     conteúdo. É o que faz o painel parecer cheio com qualquer contagem. */
+  align-content: stretch;
+  grid-auto-rows: minmax(min-content, 1fr);
+  flex: 1;
+  min-height: 0;
+  max-height: 500px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.s {
+  display: flex;
+  background: var(--card);
+  border-radius: 8px;
+  overflow: hidden;
+  min-width: 0;
+}
+/* trilho que acende quando a sessão está gerando token */
+.s .rail {
+  width: 2px;
+  flex: none;
+  background: var(--line);
+  transition: background-color .3s ease;
+}
+.s.hot .rail {
+  background: var(--accent);
+  box-shadow: 0 0 6px rgba(61, 220, 151, .55);
+}
+/* coluna flex: quando o cartão estica, a folga fica ANTES do bloco de
+   contexto+métricas (margin-top:auto no .ctx) — números ancorados na base,
+   como os tiles; nunca um vazio pendurado no fim */
+.s .body {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 11px 10px;
+  display: flex;
+  flex-direction: column;
+}
+.s .shead {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.s .prod {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+/* o texto trunca aqui dentro; sem isto o nome longo empurra o selo "aqui"
+   para fora do cartão em vez de virar reticências */
+.s .prod .ptxt {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.s .here {
+  font-size: 0.5rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: var(--ground);
+  background: var(--accent);
+  border-radius: 3px;
+  padding: 1px 3px;
+  flex: none;
+}
+.s .idle {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+.s.hot .idle { color: var(--accent); }
+.s .title {
+  font-size: 0.8125rem;
+  font-weight: 700;
+  line-height: 1.3;
+  margin-top: 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.s .meta,
+.s .stat {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--ink-mid);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.s .meta { margin-top: 2px; }
+.s .stat { margin-top: 4px; }
+.s .ctx {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+  padding-top: 7px;
+}
+.s .bar {
+  flex: 1;
+  min-width: 0;
+  height: 4px;
+  background: var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.s .bar i {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: var(--accent);
+  transition: width .5s cubic-bezier(.22, 1, .36, 1);
+}
+.s .bar i.warn { background: var(--warn); }
+.s .bar i.crit { background: var(--crit); }
+.s .cnum {
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--ink-mid);
+  font-variant-numeric: tabular-nums;
+  flex: none;
+}
+
+/* ── Telemetria (OTel nativa do Claude Code) ─────────────────────────── */
+.telgrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 10px 26px;
+}
+.telcol { min-width: 0; }
+.tsub {
+  font-family: var(--mono);
+  font-size: 0.5625rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  color: var(--ink-dim);
+  padding-bottom: 6px;
+  margin-bottom: 7px;
+  border-bottom: 1px solid var(--line);
+}
+.trows { display: flex; flex-direction: column; gap: 4px; }
+.trow {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--mono);
+  font-size: 0.6875rem;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+  min-width: 0;
+}
+.trow .tv {
+  color: var(--ink-mid);
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.trow.on  .tv { color: var(--accent); }
+.trow.off .tv { color: var(--crit); }
+.trow .tk { white-space: nowrap; }
+.panel > h2 .who.tel-on  { color: var(--accent); }
+.panel > h2 .who.tel-off { color: var(--warn); }
+
+/* ── Tooltip dos gráficos ────────────────────────────────────────────── */
+.tip {
+  position: fixed;
+  z-index: 20;
+  pointer-events: none;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 7px 9px;
+  font-family: var(--mono);
+  font-size: 0.625rem;
+  color: var(--ink-mid);
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .55);
+  white-space: nowrap;
+}
+.tip b { color: var(--ink); display: block; margin-bottom: 3px; font-weight: 700; }
+.tip span { display: block; }
+.tip u { color: var(--accent); text-decoration: none; }
+
+.empty {
+  background: var(--card);
+  border-radius: 8px;
+  padding: 16px 14px;
+  text-align: center;
+  color: var(--ink-dim);
+  font-size: 0.75rem;
+}
+.empty.full { grid-column: 1 / -1; }
+.empty code {
+  font-family: var(--mono);
+  background: var(--panel);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.err {
+  background: #2a1512;
+  border-left: 2px solid var(--crit);
+  color: #f0a396;
+  padding: 8px 11px;
+  border-radius: 0 6px 6px 0;
+  font-size: 0.6875rem;
+  font-family: var(--mono);
+}
+
+footer {
+  font-size: 0.625rem;
+  color: var(--ink-dim);
+  line-height: 1.6;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+  padding-top: 10px;
+}
+footer code {
+  font-family: var(--mono);
+  background: var(--card);
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+/* rolagem interna dos painéis: fina e da cor da linha, não a barra padrão */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--line);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-thumb:hover { background-color: var(--ink-dim); }
+
+@media (prefers-reduced-motion: reduce) {
+  * { animation: none !important; transition: none !important; }
+}
+
+/* ── O que existe em cada modo ────────────────────────────────────────── */
+body.compact .wide-only { display: none; }
+
+/* ── Modo cantinho: a coluna estreita da barra lateral ────────────────── */
+body.compact { font-size: 13px; }
+body.compact .shell { padding: 10px 10px 14px; gap: 8px; }
+body.compact footer { display: none; }
+/* cabeçalho em DUAS linhas: reator + CLAUDE + frescor em cima; data e hora
+   inteiras embaixo. O e-mail sai — truncado a 3 letras não informava nada. */
+body.compact .top { flex-wrap: wrap; row-gap: 3px; }
+body.compact .topmeta { flex-basis: 100%; padding-left: 32px; }
+body.compact .topmeta .acct { display: none; }
+body.compact .kpis { grid-template-columns: 1fr 1fr; }
+/* na coluna estreita a página inteira já rola: rolagem interna aqui seria
+   scroll dentro de scroll */
+body.compact .sessions { max-height: none; overflow-y: visible; }
+body.compact .rank { overflow-y: visible; }
+body.compact .q,
+body.compact .k { min-height: 64px; padding: 7px 9px 13px; }
+body.compact .q .qnum b,
+body.compact .k .knum b { font-size: 1.3rem; }
+body.compact .panel { padding: 10px 11px 12px; }
+body.compact .sessions { grid-template-columns: minmax(0, 1fr); }
+body.compact .comp { flex-direction: column; align-items: stretch; gap: 10px; }
+body.compact .gauge { width: 72px; height: 72px; align-self: center; }
+
+/* ── Tema do VS Code ─────────────────────────────────────────────────────
+   Mesma estrutura, cores do editor. A menta continua sendo o acento: é ela
+   que identifica o painel de relance. */
+body.theme-vscode {
+  --ground: var(--vscode-sideBar-background, var(--vscode-editor-background));
+  --panel:  var(--vscode-editorWidget-background, var(--vscode-editor-background));
+  --card:   var(--vscode-editorHoverWidget-background, var(--vscode-editorWidget-background));
+  --line:   var(--vscode-panel-border, rgba(128, 128, 128, .35));
+  --grid:   var(--vscode-panel-border, rgba(128, 128, 128, .2));
+  --ink:     var(--vscode-foreground);
+  --ink-mid: var(--vscode-descriptionForeground, var(--vscode-foreground));
+  --ink-dim: var(--vscode-disabledForeground, var(--vscode-descriptionForeground));
+  font-family: var(--vscode-font-family, var(--sans));
+}

@@ -1,0 +1,190 @@
+{
+  "name": "arc-ai-monitor",
+  "displayName": "Arc AI Monitor",
+  "description": "Monitor de uso do Claude Code dentro do VS Code: cotas oficiais da conta, sessoes ativas e consumo do dia. Le arquivos locais, nao gasta tokens.",
+  "version": "1.0.1",
+  "publisher": "AdlerGoncalves",
+  "author": {
+    "name": "Adler Gonçalves"
+  },
+  "private": true,
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "arc",
+    "uso",
+    "tokens",
+    "monitor",
+    "usage"
+  ],
+  "icon": "media/icon.png",
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "arcAiMonitor",
+          "title": "Arc AI Monitor",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "arcAiMonitor": [
+        {
+          "type": "webview",
+          "id": "arcAiMonitor.live",
+          "name": "Ao vivo",
+          "icon": "media/icon.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "arcAiMonitor.openPanel",
+        "title": "Abrir painel",
+        "category": "Arc AI Monitor"
+      },
+      {
+        "command": "arcAiMonitor.refresh",
+        "title": "Atualizar agora",
+        "category": "Arc AI Monitor",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "arcAiMonitor.focusView",
+        "title": "Mostrar na barra lateral",
+        "category": "Arc AI Monitor"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "arcAiMonitor.refresh",
+          "when": "view == arcAiMonitor.live",
+          "group": "navigation@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Arc AI Monitor",
+      "properties": {
+        "arcAiMonitor.refreshInterval": {
+          "type": "number",
+          "default": 3000,
+          "minimum": 1000,
+          "markdownDescription": "Intervalo de atualizacao (ms) enquanto algum painel esta visivel. Ler os transcripts e barato (leitura incremental), mas abaixo de 1s nao ha ganho: o Claude Code so grava consumo **ao fim de cada turno**."
+        },
+        "arcAiMonitor.idleRefreshInterval": {
+          "type": "number",
+          "default": 10000,
+          "minimum": 2000,
+          "description": "Intervalo de atualizacao (ms) quando so a barra de status esta visivel."
+        },
+        "arcAiMonitor.quotaTtl": {
+          "type": "number",
+          "default": 150,
+          "minimum": 60,
+          "markdownDescription": "Intervalo minimo (s) entre consultas de cota a `api.anthropic.com/api/oauth/usage`. Abaixo de ~60s o endpoint responde `429`. O valor e respeitado entre TODAS as janelas do VS Code (cache compartilhado em disco)."
+        },
+        "arcAiMonitor.statusBar.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Mostra as cotas na barra de status."
+        },
+        "arcAiMonitor.statusBar.alignment": {
+          "type": "string",
+          "enum": [
+            "left",
+            "right"
+          ],
+          "default": "right",
+          "description": "Lado da barra de status. Exige recarregar a janela."
+        },
+        "arcAiMonitor.statusBar.priority": {
+          "type": "number",
+          "default": 100,
+          "description": "Prioridade na barra de status (maior = mais para a borda). Exige recarregar a janela."
+        },
+        "arcAiMonitor.statusBar.meter": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Barrinha `▰▰▱▱▱` ao lado do percentual de cada cota na barra de status. Desligada por padrão — os glifos rendem irregular em muitas fontes."
+        },
+        "arcAiMonitor.statusBar.show": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "session",
+              "weekly_all",
+              "weekly_opus",
+              "weekly_scoped",
+              "spend",
+              "day_output",
+              "day_cost",
+              "sessions"
+            ]
+          },
+          "default": [
+            "session",
+            "weekly_all",
+            "weekly_scoped"
+          ],
+          "description": "O que aparece na barra de status, nesta ordem."
+        },
+        "arcAiMonitor.contextWindow": {
+          "type": "number",
+          "default": 1000000,
+          "description": "Janela de contexto usada como 100% na barra de contexto das sessoes."
+        },
+        "arcAiMonitor.historyDays": {
+          "type": "number",
+          "default": 30,
+          "minimum": 1,
+          "markdownDescription": "Tamanho da janela do historico (dias) no painel detalhado. A primeira varredura le todos os transcripts uma vez, em segundo plano; depois so os arquivos alterados sao relidos."
+        },
+        "arcAiMonitor.theme": {
+          "type": "string",
+          "enum": [
+            "escuro",
+            "vscode"
+          ],
+          "enumDescriptions": [
+            "Paleta escura propria do painel (feita para telinha/segundo monitor).",
+            "Segue as cores do tema atual do VS Code."
+          ],
+          "default": "escuro",
+          "description": "Paleta do painel."
+        },
+        "arcAiMonitor.pricing": {
+          "type": "object",
+          "default": {},
+          "markdownDescription": "Sobrescreve a tabela de precos por MILHAO de tokens. Ex.: `{ \"opus\": { \"i\": 5, \"o\": 25, \"cw\": 6.25, \"cr\": 0.5 } }`. O que nao for informado usa a tabela embutida (oficial da Anthropic, conferida em 2026-07-30)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package --out arc-ai-monitor.vsix"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.9.2",
+    "typescript": "^5.7.0"
+  }
+}
