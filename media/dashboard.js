@@ -15,6 +15,13 @@
   const SVGNS = 'http://www.w3.org/2000/svg';
 
   let CTX_MAX = 1000000;
+  /* `picked` é a escolha feita no seletor (e o que se persiste); `provider`
+     é o que está na tela. Separados porque quem usa uma ferramenta só não
+     tem escolha: vai direto para ela, sem gravar isso como preferência — se a
+     segunda ferramenta aparecer depois, a visão geral volta a ser o padrão. */
+  let picked = 'all';
+  let provider = 'all';
+  let latest;
 
   // ── formatadores ──────────────────────────────────────────────────────
   function short(n) {
@@ -160,29 +167,42 @@
   }
 
   // ── frescor da cota ───────────────────────────────────────────────────
-  function renderFresh(acct) {
-    const e = $('fresh');
+  function freshState(acct, label) {
     const age = acct ? acct.age_s : null;
     const live = acct && acct.source === 'live';
     let txt = '';
     let cls = 'fresh';
     if (age == null) {
       if (live) {
-        txt = '● ao vivo';
+        txt = label + ' ● ao vivo';
         cls = 'fresh live';
       }
     } else if (live) {
       // mostra a idade mesmo ao vivo: a consulta tem intervalo de ~2min e
       // pode recuar se a API limitar, entao "ao vivo" sozinho esconderia um
       // numero velho
-      txt = '● ' + (age < 30 ? 'agora' : dur(age));
+      txt = label + ' ● ' + (age < 30 ? 'agora' : dur(age));
       cls = age < 300 ? 'fresh live' : 'fresh old';
     } else {
-      txt = '○ ' + dur(age);
+      txt = label + ' ○ ' + dur(age);
       cls = age > 600 ? 'fresh old' : 'fresh';
     }
-    setText(e, txt);
-    setClass(e, cls);
+    return { txt, cls };
+  }
+
+  function renderFresh(claude, codex, selected) {
+    const rows = [
+      ['claude', claude, $('fresh-claude'), 'CLAUDE'],
+      ['codex', codex, $('fresh-codex'), 'CODEX'],
+    ];
+    rows.forEach(([name, account, element, label]) => {
+      // na visão geral cada cartão mostra o próprio frescor; no topo seria repetição
+      const show = selected === name;
+      const state = freshState(account, label);
+      element.hidden = !show || !state.txt;
+      setText(element, state.txt);
+      setClass(element, state.cls);
+    });
   }
 
   // ── cotas ─────────────────────────────────────────────────────────────
@@ -207,7 +227,9 @@
     return items.slice(0, 4);
   }
 
-  function tileLabel(b) {
+  /** nome da cota sem a ferramenta: "SESSÃO 5H", "SEMANAL", "FABLE". Serve
+      aos cartões da visão geral, onde a ferramenta já está no título. */
+  function tileName(b) {
     switch (b.kind) {
       case 'session':
         return 'SESSÃO 5H';
@@ -222,19 +244,27 @@
         const parts = (b.label || '').split('·');
         return (parts.length > 1 ? parts[1].trim() : 'SEMANAL').toUpperCase();
       }
-      default:
-        return (b.label || '').toUpperCase();
     }
+    // Codex: "Codex · 5 h", "Codex · 1 sem" ou "Codex · <balde> · 5 h". As
+    // janelas ganham o mesmo nome das do Claude para os cartões se lerem igual.
+    const parts = (b.label || '').replace(/^Codex\s*·\s*/i, '').split('·').map((s) => s.trim());
+    const win = parts.pop() || '';
+    const hours = /^(\d+) h$/.exec(win);
+    const name = hours ? 'SESSÃO ' + hours[1] + 'H' : win === '1 sem' ? 'SEMANAL' : win.toUpperCase();
+    return (parts.length ? parts.join(' · ').toUpperCase() + ' · ' : '') + name;
   }
 
-  function renderQuotas(acct) {
-    const box = $('kpis');
-    const items = quotaItems(acct && acct.bars, acct && acct.spend);
-    $('q-empty').hidden = items.length > 0;
+  function tileLabel(b) {
+    if (b.kind === '_spend') return 'CRÉDITOS';
+    return (b.provider === 'codex' ? 'CODEX' : 'CLAUDE') + ' · ' + tileName(b);
+  }
 
+  /* Tiles de cota com filete. Mesmo componente na faixa de KPI dos painéis
+     e nos cartões da visão geral; `prefix` separa os ids de cada lugar. */
+  function syncQuotaTiles(box, items, prefix, before, label, foot) {
     const keep = new Set();
     items.forEach((b, idx) => {
-      const key = 'q_' + (b.kind || idx);
+      const key = prefix + String(b.kind || idx).replace(/[^a-zA-Z0-9_]/g, '_');
       keep.add(key);
       let e = document.getElementById(key);
       if (!e) {
@@ -245,23 +275,39 @@
           '<div class="qlbl"></div>' +
           '<div class="qfoot"></div>' +
           '<div class="qfil"><i></i></div>';
-        box.insertBefore(e, $('k_out'));
+        box.insertBefore(e, before || null);
       }
       const sev = (b.severity || 'normal').toLowerCase();
       setClass(e, 'q ' + sev);
       if (e.style.order !== String(idx)) e.style.order = idx;
 
       setText(e.querySelector('.qnum b'), String(Math.round(b.percent)));
-      setText(e.querySelector('.qlbl'), tileLabel(b));
-      setText(e.querySelector('.qfoot'), b.foot || (b.resets_at ? '↻ ' + until(b.resets_at) : ''));
+      setText(e.querySelector('.qlbl'), label(b));
+      setText(e.querySelector('.qfoot'), foot(b));
       const fil = e.querySelector('.qfil i');
       const w = Math.min(Math.max(b.percent || 0, 0), 100) + '%';
       if (fil.style.width !== w) fil.style.width = w;
     });
 
-    // os tiles fixos de consumo (k_*) e o aviso de cota ausente ficam
+    // só remove o que este lugar criou: os tiles fixos (k_*) e os avisos ficam
     [].slice.call(box.children).forEach((c) => {
-      if (c.id.charAt(0) === 'q' && c.id !== 'q-empty' && !keep.has(c.id)) c.remove();
+      if (c.id.indexOf(prefix) === 0 && !keep.has(c.id)) c.remove();
+    });
+  }
+
+  function resetText(b) {
+    return b.foot || (b.resets_at ? '↻ ' + until(b.resets_at) : '');
+  }
+
+  function renderQuotas(acct, codex) {
+    const withSource = (account, key) => quotaItems(account && account.bars, account && account.spend)
+      .map((item) => Object.assign(item, { source: account && account.source, provider_key: key }));
+    const items = withSource(acct, 'claude').concat(withSource(codex, 'codex'));
+    $('q-empty').hidden = items.length > 0;
+    syncQuotaTiles($('kpis'), items, 'q_', $('k_out'), tileLabel, (b) => {
+      const source = b.source === 'live' ? '● oficial' : b.provider_key === 'codex' ? '○ última consulta' : '○ cache';
+      const reset = resetText(b);
+      return reset ? source + ' · ' + reset : source;
     });
   }
 
@@ -269,18 +315,28 @@
   function renderDay(d) {
     const day = d.day;
     const now = new Date();
-    setText($('d-date'), DIAS[now.getDay()] + ' ' + dmy(d.date));
 
     const [val, unit] = splitUnit(day.output);
     setText($('d-out'), val);
     setText($('d-unit'), unit);
-    setText($('d-turns'), brl(day.turns) + ' turnos');
+    const providers = day.providers || {};
+    const used = Object.keys(providers).filter((key) => providers[key].turns || providers[key].total);
+    const names = used.map((key) => key.toUpperCase());
+    const breakdown = used.map((key) => key.toUpperCase() + ' ' + short(providers[key].output)).join(' · ');
+    setText($('d-out-label'), names.length ? 'SAÍDA HOJE · ' + names.join(' + ') : 'SAÍDA HOJE');
+    // com uma ferramenta só, a quebra repetiria o número grande do tile
+    setText($('d-turns'), brl(day.turns) + ' turnos' + (used.length > 1 ? ' · ' + breakdown : ''));
 
     const comp = day.comp || { i: 0, o: 0, cw: 0, cr: 0, total: 0 };
     const [mv, mu] = splitUnit(comp.total);
     setText($('d-mov'), mv);
     setText($('d-movu'), mu);
-    setText($('d-cost'), brl(day.cost));
+    setText($('d-mov-label'), names.length > 1 ? 'MOVIMENTADO · COMBINADO' : names.length ? 'MOVIMENTADO · ' + names[0] : 'MOVIMENTADO');
+    const isCodex = provider === 'codex';
+    setText($('d-cost'), isCodex ? brl(day.turns) : brl(day.cost));
+    setText($('d-cost-unit'), isCodex ? '' : 'US$');
+    setText($('d-cost-label'), isCodex ? 'TURNOS HOJE · CODEX' : 'EQUIVALENTE API · CLAUDE');
+    setText($('d-cost-foot'), isCodex ? 'turnos nos registros locais' : 'estimativa Claude, não fatura');
 
     hourChart($('d-chart'), day.hours || [], now.getHours());
     renderComp(comp);
@@ -302,8 +358,9 @@
     const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'none' });
     const defs = el('defs');
     const g = el('linearGradient', { id: 'gradAccent', x1: '0', y1: '0', x2: '0', y2: '1' });
-    g.appendChild(el('stop', { offset: '0%', 'stop-color': '#3ddc97', 'stop-opacity': '.38' }));
-    g.appendChild(el('stop', { offset: '100%', 'stop-color': '#3ddc97', 'stop-opacity': '0' }));
+    // cor no css (.g-top/.g-bot): segue o acento, que muda no painel Codex
+    g.appendChild(el('stop', { offset: '0%', class: 'g-top' }));
+    g.appendChild(el('stop', { offset: '100%', class: 'g-bot' }));
     defs.appendChild(g);
     svg.appendChild(defs);
 
@@ -412,24 +469,24 @@
 
   // ── histórico ─────────────────────────────────────────────────────────
   let histSig = '';
-  function renderHistory(h) {
+  function renderHistory(h, selected) {
     if (!h || !h.ready) {
-      setText($('h-title'), 'HISTÓRICO');
-      setText($('h-sum'), 'varrendo os transcripts…');
+      setText($('h-title'), 'HISTÓRICO ' + selected.toUpperCase());
+      setText($('h-sum'), 'varrendo os registros…');
       return;
     }
-    setText($('h-title'), h.window + ' DIAS');
+    setText($('h-title'), selected.toUpperCase() + ' · ' + h.window + ' DIAS');
     const T = h.totals;
     setText(
       $('h-sum'),
-      'US$ ' + brl(T.cost) + ' · ' + short(T.total) + ' · ' + brl(T.turns) + ' turnos',
+      (selected === 'claude' ? 'US$ ' + brl(T.cost) + ' · ' : '') + short(T.total) + ' · ' + brl(T.turns) + ' turnos',
     );
 
     const days = h.days || [];
-    const sig = days.map((d) => d.d + ':' + d.total).join('|');
+    const sig = selected + '|' + days.map((d) => [d.d, d.total, d.output, d.cost, d.turns].join(':')).join('|');
     if (sig !== histSig) {
       histSig = sig;
-      dayChart($('h-chart'), days);
+      dayChart($('h-chart'), days, selected);
       const S = $('h-scale');
       if (days.length) {
         const mid = days[Math.floor(days.length / 2)];
@@ -439,12 +496,12 @@
       }
     }
 
-    renderRank($('h-projects'), h.projects);
-    renderRank($('h-models'), h.models);
+    renderRank($('h-projects'), h.projects, selected);
+    renderRank($('h-models'), h.models, selected);
   }
 
   /* Barras com topo arredondado, gridline e a média do período tracejada. */
-  function dayChart(box, days) {
+  function dayChart(box, days, selected) {
     const W = 300;
     const H = 86;
     const PAD = 4;
@@ -478,8 +535,8 @@
           short(d.total) +
           '</u> movimentados</span><span>' +
           short(d.output) +
-          ' de saída · ≈US$ ' +
-          brl(d.cost) +
+          ' de saída' +
+          (selected === 'claude' ? ' · ≈US$ ' + brl(d.cost) : '') +
           '</span><span>' +
           brl(d.turns) +
           ' turnos</span>',
@@ -496,7 +553,7 @@
     box.appendChild(svg);
   }
 
-  function renderRank(box, rows) {
+  function renderRank(box, rows, selected) {
     rows = rows || [];
     if (box.children.length !== rows.length) {
       box.innerHTML = rows
@@ -515,7 +572,8 @@
       const bar = e.querySelector('.rb i');
       const w = ((r.total / max) * 100).toFixed(1) + '%';
       if (bar.style.width !== w) bar.style.width = w;
-      const ti = r.n + ' — ' + brl(r.total) + ' tokens · ≈US$ ' + brl(r.cost);
+      const ti = r.n + ' — ' + brl(r.total) + ' tokens' +
+        (selected === 'claude' ? ' · ≈US$ ' + brl(r.cost) : '');
       if (e.title !== ti) e.title = ti;
     });
   }
@@ -649,11 +707,10 @@
     }
     if (box.querySelector('.empty')) box.innerHTML = '';
 
-    const capTxt = CTX_MAX === 1e6 ? '1mi' : short(CTX_MAX);
     const keep = new Set();
 
     sessions.forEach((s, idx) => {
-      const key = 'c' + s.pid;
+      const key = 'c_' + (s.provider || 'claude') + '_' + s.sid;
       keep.add(key);
       let e = document.getElementById(key);
       if (!e) {
@@ -674,7 +731,7 @@
       setClass(e, 's' + (hot ? ' hot' : ''));
       if (e.style.order !== String(idx)) e.style.order = idx;
 
-      setText(e.querySelector('.ptxt'), (s.product || s.name || '?').toUpperCase());
+      setText(e.querySelector('.ptxt'), (s.provider === 'codex' ? 'CODEX · ' : 'CLAUDE · ') + (s.product || s.name || '?').toUpperCase());
       e.querySelector('.here').hidden = !s.here;
       setText(e.querySelector('.idle'), (hot ? '▶ ' : '') + ago(s.idle));
 
@@ -688,8 +745,7 @@
       // cartão precisa dizer que está somando — senão o número parece errado
       setText(
         e.querySelector('.meta'),
-        'pid ' +
-          s.pid +
+        (s.provider === 'codex' ? 'Codex local' : 'Claude · pid ' + s.pid) +
           ' · ' +
           (s.model || '?') +
           ' · desde ' +
@@ -697,7 +753,9 @@
           (s.subagents ? ' · +' + s.subagents + ' sub' : ''),
       );
 
-      const p = Math.min((s.context / CTX_MAX) * 100, 100);
+      const cap = s.context_max || CTX_MAX;
+      const capTxt = cap === 1e6 ? '1mi' : short(cap);
+      const p = Math.min((s.context / cap) * 100, 100);
       const lvl = p >= 90 ? 'crit' : p >= 70 ? 'warn' : '';
       const bar = e.querySelector('.bar i');
       const w = p.toFixed(1) + '%';
@@ -708,7 +766,8 @@
       setText(
         e.querySelector('.stat'),
         s.turns
-          ? short(s.output) + ' saída · ' + s.turns + ' turnos · ≈$' + money(s.cost)
+          ? short(s.output) + ' saída · ' + s.turns + ' turnos' +
+            (s.provider === 'codex' ? '' : ' · ≈$' + money(s.cost))
           : 'aguardando o primeiro turno',
       );
     });
@@ -719,27 +778,531 @@
   }
 
   // ── entrada ───────────────────────────────────────────────────────────
-  function render(d) {
-    if (!d) return;
-    if (typeof d.ctx_max === 'number' && d.ctx_max > 0) CTX_MAX = d.ctx_max;
+  function filtered(d) {
+    if (provider === 'all') return d;
+    const slice = d.day && d.day.providers && d.day.providers[provider];
+    const day = slice ? Object.assign({}, d.day, {
+      output: slice.output,
+      cost: slice.cost,
+      turns: slice.turns,
+      comp: slice.comp,
+      hours: slice.hours,
+      models: slice.models,
+      providers: { [provider]: slice },
+    }) : d.day;
+    return Object.assign({}, d, {
+      account: provider === 'claude' ? d.account : { bars: [], spend: null, age_s: null, source: 'none' },
+      codex: provider === 'codex' ? d.codex : undefined,
+      sessions: (d.sessions || []).filter((s) => s.provider === provider),
+      day,
+      history: provider === 'claude' ? d.history : d.codexHistory,
+      telemetry: provider === 'claude' ? d.telemetry : undefined,
+    });
+  }
 
-    if (d.error) {
+  /** quais ferramentas esta máquina usa: cota, consumo, histórico ou sessão */
+  function detect(raw) {
+    const sessions = raw.sessions || [];
+    const used = (name, account, history) =>
+      ((account && account.bars) || []).length > 0 ||
+      ((raw.day && raw.day.providers && raw.day.providers[name] && raw.day.providers[name].total) || 0) > 0 ||
+      ((history && history.totals && history.totals.total) || 0) > 0 ||
+      sessions.some((s) => s.provider === name);
+    return {
+      claude: used('claude', raw.account, raw.history),
+      codex: used('codex', raw.codex, raw.codexHistory),
+    };
+  }
+
+  /* A visão geral só existe com as duas ferramentas. Com uma só, o painel
+     dela é o único destino — e o seletor some, porque não há o que escolher. */
+  function resolveView(has) {
+    if (picked === 'claude' && has.claude) return 'claude';
+    if (picked === 'codex' && has.codex) return 'codex';
+    if (has.claude && has.codex) return 'all';
+    return has.codex && !has.claude ? 'codex' : 'claude';
+  }
+
+  function render(raw) {
+    if (!raw) return;
+    latest = raw;
+
+    if (raw.error) {
+      // payload de erro vem vazio: não serve para decidir qual painel mostrar
       setLevel(0);
-      $('alert').innerHTML = '<div class="err">' + escapeHtml(d.error) + '</div>';
+      $('alert').innerHTML = '<div class="err">' + escapeHtml(raw.error) + '</div>';
       return;
     }
     if ($('alert').innerHTML !== '') $('alert').innerHTML = '';
 
+    const has = detect(raw);
+    provider = resolveView(has);
+    const overview = provider === 'all';
+
+    const views = $('views');
+    views.hidden = !(has.claude && has.codex);
+    [].slice.call(views.children).forEach((b) => {
+      const on = String(b.dataset.go === provider);
+      if (b.getAttribute('aria-pressed') !== on) b.setAttribute('aria-pressed', on);
+    });
+    document.body.classList.toggle('prov-codex', provider === 'codex');
+
+    const d = filtered(raw);
+    if (typeof d.ctx_max === 'number' && d.ctx_max > 0) CTX_MAX = d.ctx_max;
+
     setLevel(levelOf(d.sessions));
     setText($('clock'), d.now);
-    const acct = d.account || {};
-    setText($('sess-acct'), acct.email || (acct.account || acct.tier || '').toUpperCase());
-    renderFresh(acct);
-    renderQuotas(acct);
+    setText($('d-date'), DIAS[new Date().getDay()] + ' ' + dmy(d.date));
+    renderFresh(raw.account, raw.codex, provider);
+
+    // identidade no topo só no painel de uma ferramenta; na visão geral cada
+    // cartão já traz a sua
+    const who = provider === 'codex' ? d.codex : d.account;
+    const ident = !overview && who && (who.bars || []).length
+      ? provider.toUpperCase() + (who.email ? ' · ' + who.email : who.tier ? ' · ' + String(who.tier).toUpperCase() : '')
+      : '';
+    setText($('sess-acct'), ident);
+
+    $('overview').hidden = !overview;
+    $('kpis').hidden = overview;
+    $('live-grid').hidden = overview;
+    $('hist-grid').hidden = overview;
+    $('tel-panel').hidden = provider !== 'claude';
+    $('codex-detail').hidden = provider !== 'codex';
+    $('panel-footer').hidden = overview;
+    $('footer-claude').hidden = provider !== 'claude';
+    $('footer-codex').hidden = provider !== 'codex';
+
+    if (overview) {
+      renderOverview(raw);
+      return;
+    }
+    $('q-empty').textContent = provider === 'codex'
+      ? 'Cotas Codex não encontradas. Abra o Codex e faça login.'
+      : 'Cotas Claude não encontradas. Abra o Claude Code e rode /usage.';
+    renderQuotas(d.account, d.codex);
     renderDay(d);
-    renderHistory(d.history);
-    renderTelemetry(d.telemetry, d);
+    renderHistory(d.history, provider);
+    if (provider === 'claude') renderTelemetry(d.telemetry, d);
+    else renderCodexDetail(d);
     renderSessions(d);
+  }
+
+  // ── visão geral ───────────────────────────────────────────────────────
+  const PROVIDERS = ['claude', 'codex'];
+  const EMPTY_SLICE = { output: 0, total: 0, turns: 0, cost: 0, models: [], hours: [] };
+  const isHot = (s) => s.idle != null && s.idle < 90;
+
+  function renderOverview(raw) {
+    const prov = (raw.day && raw.day.providers) || {};
+    const slice = (name) => prov[name] || EMPTY_SLICE;
+    const sessions = raw.sessions || [];
+
+    PROVIDERS.forEach((name) => {
+      renderAccountCard(
+        name,
+        name === 'claude' ? raw.account : raw.codex,
+        slice(name),
+        sessions.filter((s) => s.provider === name),
+      );
+    });
+
+    // ── hoje, lado a lado ──
+    const c = slice('claude');
+    const x = slice('codex');
+    legend($('ov-h-legend'), c.output, x.output, short);
+    const hourOf = (list, h) => ((list || [])[h] || {}).o || 0;
+    const hours = [];
+    for (let h = 0; h < 24; h++) {
+      hours.push({ label: String(h).padStart(2, '0') + 'h', c: hourOf(c.hours, h), x: hourOf(x.hours, h) });
+    }
+    stackedChart($('ov-h-chart'), hours, { gap: 3, now: new Date().getHours(), noun: 'de saída' });
+    renderSplits($('ov-split-today'), [
+      ['SAÍDA', c.output, x.output, short],
+      ['MOVIMENTADO', c.total, x.total, short],
+      ['TURNOS', c.turns, x.turns, brl],
+    ]);
+
+    renderOvSessions(sessions);
+    renderOvHistory(raw.history, raw.codexHistory);
+  }
+
+  /* Situação da conta em uma frase, com o ícone de status na frente: é a
+     primeira coisa que se lê no cartão, antes dos números. */
+  function headroom(items) {
+    if (!items.length) return { cls: 'ov-headroom', html: '<span class="st">○</span> sem leitura de cota' };
+    const top = items.reduce((a, b) => (b.percent > a.percent ? b : a));
+    const sev = (top.severity || 'normal').toLowerCase();
+    const name = tileName(top).toLowerCase();
+    const what = '<b>' + escapeHtml(name.charAt(0).toUpperCase() + name.slice(1)) + ' ' + Math.round(top.percent) + '%</b>';
+    const left = top.resets_at ? until(top.resets_at) : '';
+    const when = !left ? '' : left === 'renovando' ? ' · renovando agora' : ' · renova em ' + left;
+    if (sev === 'critical') return { cls: 'ov-headroom crit', html: '<span class="st">✕ No limite</span> · ' + what + when };
+    if (sev === 'warning') return { cls: 'ov-headroom warn', html: '<span class="st">▲ Atenção</span> · ' + what + when };
+    return { cls: 'ov-headroom ok', html: '<span class="st">✓ Com folga</span> · maior uso ' + what };
+  }
+
+  function setHtml(node, html) {
+    if (node._html !== html) {
+      node.innerHTML = html;
+      node._html = html;
+    }
+  }
+
+  function renderAccountCard(name, acct, slice, sessions) {
+    acct = acct || { bars: [], spend: null, age_s: null, source: 'none' };
+    const plan = name === 'claude' ? acct.account || acct.tier : acct.tier;
+    setText(
+      $('ov-' + name + '-who'),
+      [plan ? String(plan).replace(/_/g, ' ').toUpperCase() : '', acct.email || ''].filter(Boolean).join(' · '),
+    );
+
+    // frescor da cota: ao vivo x última leitura, com a idade sempre à vista
+    const fresh = $('ov-' + name + '-fresh');
+    const age = acct.age_s;
+    const when = age == null ? '' : ' · ' + (age < 30 ? 'agora' : 'há ' + dur(age));
+    if (acct.source === 'live') {
+      setText(fresh, '● ao vivo' + when);
+      setClass(fresh, age != null && age >= 300 ? 'fresh old' : 'fresh live');
+    } else if (acct.source === 'cache') {
+      setText(fresh, '○ ' + (name === 'codex' ? 'última consulta' : 'cache') + when);
+      setClass(fresh, age != null && age > 600 ? 'fresh old' : 'fresh');
+    } else {
+      setText(fresh, '');
+    }
+
+    const items = quotaItems(acct.bars, acct.spend);
+    const state = headroom(items);
+    const st = $('ov-' + name + '-state');
+    setClass(st, state.cls);
+    setHtml(st, state.html);
+
+    const box = $('ov-' + name + '-quotas');
+    let empty = box.querySelector('.empty');
+    if (!empty) {
+      empty = document.createElement('div');
+      empty.className = 'empty';
+      empty.textContent = name === 'codex'
+        ? 'Cotas indisponíveis — abra o Codex e faça login.'
+        : 'Cotas indisponíveis — rode /usage no Claude Code.';
+      box.appendChild(empty);
+    }
+    empty.hidden = items.length > 0;
+    syncQuotaTiles(box, items, 'oq_' + name + '_', null, tileName, (b) => resetText(b) || '—');
+
+    setText($('ov-' + name + '-out'), short(slice.output));
+    setText($('ov-' + name + '-mov'), short(slice.total));
+    setText($('ov-' + name + '-turns'), brl(slice.turns));
+    const hot = sessions.filter(isHot).length;
+    setText($('ov-' + name + '-sess'), String(sessions.length));
+    setText($('ov-' + name + '-sess-l'), hot ? 'SESSÕES · ' + hot + ' GERANDO' : 'SESSÕES ATIVAS');
+
+    const model = slice.models && slice.models[0];
+    let foot = model ? 'modelo do dia: ' + model.n : 'sem atividade hoje';
+    if (name === 'claude' && slice.cost > 0) foot += ' · ≈ US$ ' + money(slice.cost) + ' em API';
+    setText($('ov-' + name + '-foot'), foot);
+  }
+
+  /** legenda com o total de cada série: identifica a cor e já dá o número */
+  function legend(box, c, x, fmt) {
+    if (!box.dataset.built) {
+      box.innerHTML =
+        '<span><em class="sw claude"></em>Claude <b></b></span>' +
+        '<span><em class="sw codex"></em>Codex <b></b></span>';
+      box.dataset.built = '1';
+    }
+    const vals = box.querySelectorAll('b');
+    setText(vals[0], fmt(c));
+    setText(vals[1], fmt(x));
+  }
+
+  /* Colunas empilhadas, Claude na base e Codex em cima — ordem fixa, cor
+     fixa por ferramenta. Uma escala só: a altura total é a soma, e o respiro
+     de 2px entre os segmentos separa as duas sem precisar de contorno. */
+  const chartSig = {};
+  function stackedChart(box, rows, opts) {
+    const sig = rows.map((r) => r.label + ':' + r.c + ':' + r.x).join('|') + '|' + opts.now;
+    if (chartSig[box.id] === sig) return;
+    chartSig[box.id] = sig;
+
+    const W = 300;
+    const H = 86;
+    const PAD = 4;
+    const SEP = 1.5;
+    const n = Math.max(rows.length, 1);
+    const gap = opts.gap;
+    const bw = (W - gap * (n - 1)) / n;
+    const inner = H - PAD * 2;
+    const max = Math.max.apply(null, rows.map((r) => r.c + r.x).concat([1]));
+    const rx = Math.min(bw / 2.6, 2);
+
+    const svg = el('svg', { viewBox: '0 0 ' + W + ' ' + H, preserveAspectRatio: 'none' });
+    for (let k = 1; k <= 3; k++) {
+      const y = PAD + (inner * k) / 4;
+      svg.appendChild(el('line', { class: 'gridline', x1: 0, y1: y, x2: W, y2: y }));
+    }
+    svg.appendChild(el('line', { class: 'axisline', x1: 0, y1: H - PAD, x2: W, y2: H - PAD }));
+
+    rows.forEach((r, i) => {
+      const x0 = i * (bw + gap);
+      const g = el('g', { class: 'stack' });
+      const tot = r.c + r.x;
+      if (tot <= 0) {
+        g.appendChild(el('rect', { class: 'bar zero', x: x0, y: H - PAD - 1.5, width: bw, height: 1.5, rx: rx }));
+      } else {
+        const full = Math.max((tot / max) * inner, 2);
+        const hc = r.c > 0 ? Math.max((full * r.c) / tot, 1) : 0;
+        const hx = r.x > 0 ? Math.max(full - hc - (hc ? SEP : 0), 1) : 0;
+        let y = H - PAD;
+        if (hc) {
+          y -= hc;
+          g.appendChild(el('rect', { class: 'seg-claude', x: x0, y: y, width: bw, height: hc, rx: rx }));
+        }
+        if (hx) {
+          y -= (hc ? SEP : 0) + hx;
+          g.appendChild(el('rect', { class: 'seg-codex', x: x0, y: y, width: bw, height: hx, rx: rx }));
+        }
+      }
+      // alvo de hover na altura toda: a coluna baixa é fina demais para mirar
+      g.appendChild(el('rect', { class: 'hit', x: x0 - gap / 2, y: 0, width: bw + gap, height: H }));
+      bindTip(
+        g,
+        '<b>' + escapeHtml(r.label) + '</b>' +
+          '<span><em class="sw claude"></em> Claude · ' + short(r.c) + ' ' + opts.noun + '</span>' +
+          '<span><em class="sw codex"></em> Codex · ' + short(r.x) + ' ' + opts.noun + '</span>' +
+          (tot > 0 ? '<span>Claude ' + Math.round((r.c / tot) * 100) + '% · Codex ' + Math.round((r.x / tot) * 100) + '%</span>' : ''),
+      );
+      svg.appendChild(g);
+    });
+
+    if (opts.avg) {
+      const withData = rows.filter((r) => r.c + r.x > 0);
+      if (withData.length) {
+        const avg = withData.reduce((a, r) => a + r.c + r.x, 0) / withData.length;
+        const y = H - PAD - (avg / max) * inner;
+        svg.appendChild(el('line', { class: 'refline', x1: 0, y1: y, x2: W, y2: y }));
+      }
+    }
+    // marca da hora corrente abaixo do eixo: onde o dia está agora
+    if (opts.now != null && rows[opts.now]) {
+      svg.appendChild(el('rect', { class: 'nowtick', x: opts.now * (bw + gap), y: H - PAD + 1.5, width: bw, height: 2, rx: 1 }));
+    }
+
+    box.innerHTML = '';
+    box.appendChild(svg);
+  }
+
+  /* Parte-do-todo em barra 100%: dois segmentos, sempre Claude à esquerda. */
+  function renderSplits(box, list) {
+    if (box.children.length !== list.length) {
+      box.innerHTML = list
+        .map(
+          () =>
+            '<div class="srow"><span class="sk"></span><span class="sbar">' +
+            '<i class="b-claude"></i><i class="b-codex"></i></span><span class="sv"></span></div>',
+        )
+        .join('');
+    }
+    list.forEach(([label, c, x, fmt], i) => {
+      const row = box.children[i];
+      const tot = c + x;
+      const pc = tot > 0 ? (c / tot) * 100 : 0;
+      setText(row.querySelector('.sk'), label);
+      const bar = row.querySelector('.sbar');
+      setClass(bar, 'sbar' + (tot > 0 ? ' has' : ''));
+      setSeg(bar.children[0], tot > 0 ? pc : 0);
+      setSeg(bar.children[1], tot > 0 ? 100 - pc : 0);
+      setText(row.querySelector('.sv'), tot > 0 ? Math.round(pc) + '% · ' + Math.round(100 - pc) + '%' : '—');
+      const ti = 'Claude ' + fmt(c) + ' · Codex ' + fmt(x);
+      if (row.title !== ti) row.title = ti;
+    });
+  }
+
+  function setSeg(node, pct) {
+    node.hidden = !(pct > 0);
+    const w = pct.toFixed(1) + '%';
+    if (node.style.width !== w) node.style.width = w;
+  }
+
+  /* Ranking com barra em dois segmentos (projeto usado pelas duas) ou em um
+     só com a amostra de cor na frente (modelo, que é de uma ferramenta). */
+  function renderStackRank(box, rows, swatch) {
+    if (box.children.length !== rows.length) {
+      box.innerHTML = rows.length
+        ? rows
+            .map(
+              () =>
+                '<div class="rrow"><div class="rtop"><span class="rn"><em class="sw"></em><span></span></span>' +
+                '<span class="rv"></span></div><span class="rb two"><i class="b-claude"></i>' +
+                '<i class="b-codex"></i><i class="rest"></i></span></div>',
+            )
+            .join('')
+        : '';
+    }
+    const max = Math.max.apply(null, rows.map((r) => r.c + r.x).concat([1]));
+    rows.forEach((r, i) => {
+      const e = box.children[i];
+      const sw = e.querySelector('.rn .sw');
+      sw.hidden = !swatch;
+      if (swatch) setClass(sw, 'sw ' + (r.x > r.c ? 'codex' : 'claude'));
+      setText(e.querySelector('.rn span'), r.n);
+      setText(e.querySelector('.rv'), short(r.c + r.x));
+      const segs = e.querySelectorAll('.rb i');
+      setSeg(segs[0], (r.c / max) * 100);
+      setSeg(segs[1], (r.x / max) * 100);
+      segs[2].hidden = r.c + r.x >= max;
+      const ti = r.n + ' — Claude ' + brl(r.c) + ' · Codex ' + brl(r.x) + ' tokens de saída';
+      if (e.title !== ti) e.title = ti;
+    });
+  }
+
+  function mergeRank(a, b) {
+    const map = new Map();
+    (a || []).forEach((r) => map.set(r.n, { n: r.n, c: r.output, x: 0 }));
+    (b || []).forEach((r) => {
+      const m = map.get(r.n) || { n: r.n, c: 0, x: 0 };
+      m.x = r.output;
+      map.set(r.n, m);
+    });
+    return [...map.values()]
+      .filter((r) => r.c + r.x > 0)
+      .sort((p, q) => q.c + q.x - (p.c + p.x))
+      .slice(0, 8);
+  }
+
+  function renderOvHistory(ch, xh) {
+    const ready = ch && ch.ready;
+    const byDay = new Map();
+    ((ready && ch.days) || []).forEach((d) => byDay.set(d.d, { label: d.d, c: d.output, x: 0 }));
+    ((xh && xh.days) || []).forEach((d) => {
+      const r = byDay.get(d.d) || { label: d.d, c: 0, x: 0 };
+      r.x = d.output;
+      byDay.set(d.d, r);
+    });
+    const days = [...byDay.values()].sort((a, b) => (a.label < b.label ? -1 : 1));
+    const window = (ready && ch.window) || (xh && xh.window) || days.length;
+
+    setText($('ov-d-title'), 'HISTÓRICO · ' + window + ' DIAS · SAÍDA POR DIA');
+    legend(
+      $('ov-d-legend'),
+      ready ? ch.totals.o : 0,
+      (xh && xh.totals && xh.totals.o) || 0,
+      (v) => (ready || v ? short(v) : '…'),
+    );
+    stackedChart(
+      $('ov-d-chart'),
+      days.map((d) => ({ label: dmy(d.label), c: d.c, x: d.x })),
+      { gap: 1.6, avg: true, noun: 'de saída' },
+    );
+    const S = $('ov-d-scale');
+    if (days.length) {
+      const marks = [dmy(days[0].label), dmy(days[Math.floor(days.length / 2)].label), 'hoje'];
+      if (S.children.length !== 3) S.innerHTML = '<span></span><span></span><span></span>';
+      marks.forEach((m, i) => setText(S.children[i], m));
+    }
+    // enquanto o histórico Claude varre, a divisão mostraria "0% · 100%":
+    // melhor não mostrar número nenhum do que um número errado
+    const ct = ready ? ch.totals : { o: 0, total: 0, turns: 0 };
+    const xt = (ready && xh && xh.totals) || { o: 0, total: 0, turns: 0 };
+    renderSplits($('ov-split-period'), [
+      ['SAÍDA', ct.o, xt.o, short],
+      ['MOVIMENTADO', ct.total, xt.total, short],
+      ['TURNOS', ct.turns, xt.turns, brl],
+    ]);
+
+    renderStackRank($('ov-projects'), mergeRank(ready && ch.projects, xh && xh.projects), false);
+    renderStackRank($('ov-models'), mergeRank(ready && ch.models, xh && xh.models), true);
+  }
+
+  /* Sessões das duas ferramentas numa lista só, mais recente em cima. Mais
+     densa que os cartões dos painéis: aqui a pergunta é "o que está rodando",
+     não o detalhe de cada uma. */
+  function renderOvSessions(sessions) {
+    const n = sessions.length;
+    const hot = sessions.filter(isHot).length;
+    setText($('ov-s-count'), n === 1 ? '1 SESSÃO ATIVA' : n + ' SESSÕES ATIVAS');
+    setText($('ov-s-note'), n ? (hot ? hot + ' gerando agora' : 'nenhuma gerando agora') : '');
+
+    const box = $('ov-sessions');
+    if (!n) {
+      if (!box.querySelector('.empty')) {
+        box.innerHTML = '<div class="empty">Nenhuma sessão ativa no Claude nem no Codex.</div>';
+      }
+      return;
+    }
+    const stale = box.querySelector('.empty');
+    if (stale) stale.remove();
+
+    const keep = new Set();
+    sessions.forEach((s, idx) => {
+      const name = s.provider === 'codex' ? 'codex' : 'claude';
+      const key = 'ovs_' + name + '_' + s.sid;
+      keep.add(key);
+      let e = document.getElementById(key);
+      if (!e) {
+        e = document.createElement('div');
+        e.id = key;
+        e.innerHTML =
+          '<div class="rail"></div><div class="ovs-body">' +
+          '<div class="ovs-top"><em class="sw ' + name + '"></em><span class="ovs-prod"></span>' +
+          '<span class="ovs-idle"></span></div>' +
+          '<div class="ovs-meta"></div>' +
+          '<div class="ovs-ctx"><div class="bar"><i></i></div><span class="cnum"></span></div></div>';
+        box.appendChild(e);
+      }
+      const on = isHot(s);
+      setClass(e, 'ovs ' + name + (on ? ' hot' : ''));
+      if (e.style.order !== String(idx)) e.style.order = idx;
+
+      setText(e.querySelector('.ovs-prod'), (s.product || s.name || '?').toUpperCase());
+      setText(e.querySelector('.ovs-idle'), (on ? '▶ ' : '') + ago(s.idle));
+      const meta = [s.title, s.model || '?', s.turns ? s.turns + ' turnos' : 'aguardando o 1º turno']
+        .concat(s.turns ? [short(s.output) + ' saída'] : [])
+        .filter(Boolean)
+        .join(' · ');
+      setText(e.querySelector('.ovs-meta'), meta);
+      const ti = (s.cwd_full || '') + '\n' + s.sid;
+      if (e.title !== ti) e.title = ti;
+
+      const cap = s.context_max || CTX_MAX;
+      const p = Math.min((s.context / cap) * 100, 100);
+      const bar = e.querySelector('.bar i');
+      const w = p.toFixed(1) + '%';
+      if (bar.style.width !== w) bar.style.width = w;
+      setClass(bar, p >= 90 ? 'crit' : p >= 70 ? 'warn' : '');
+      setText(e.querySelector('.cnum'), 'ctx ' + short(s.context) + ' / ' + (cap === 1e6 ? '1mi' : short(cap)));
+    });
+
+    [].slice.call(box.children).forEach((c) => {
+      if (!keep.has(c.id)) c.remove();
+    });
+  }
+
+  function renderCodexDetail(d) {
+    const comp = d.day?.comp || {};
+    const account = d.codex || {};
+    const history = d.history || {};
+    rows($('cx-usage'), [
+      { k: 'entrada', v: short(comp.i || 0) },
+      { k: 'saída', v: short(comp.o || 0) },
+      { k: 'cache · leitura', v: short(comp.cr || 0) },
+      { k: 'cache · escrita', v: short(comp.cw || 0) },
+      { k: 'turnos', v: brl(d.day?.turns || 0) },
+    ]);
+    rows($('cx-account'), [
+      { k: 'conta', v: account.email || '—' },
+      { k: 'plano', v: account.tier || '—' },
+      { k: 'origem da cota', v: account.source === 'live' ? 'consulta oficial' : account.source === 'cache' ? 'última consulta' : 'indisponível' },
+      { k: 'consultada há', v: account.age_s == null ? '—' : ago(account.age_s) },
+      { k: 'janelas', v: String((account.bars || []).length) },
+    ]);
+    rows($('cx-history'), [
+      { k: 'período', v: (history.window || 0) + ' dias' },
+      { k: 'tokens no período', v: short(history.totals?.total || 0) },
+      { k: 'turnos no período', v: brl(history.totals?.turns || 0) },
+      { k: 'projetos', v: String((history.projects || []).length) },
+      { k: 'fonte', v: '~/.codex/sessions' },
+    ]);
   }
 
   function escapeHtml(s) {
@@ -754,12 +1317,35 @@
     if (msg && msg.type === 'data') {
       // guarda o último payload: quando a view volta a ficar visível o VS Code
       // recria o webview e ela nasce com número em vez de vazia
-      vscode.setState(msg.payload);
+      vscode.setState({ data: msg.payload, picked });
       render(msg.payload);
     }
   });
 
+  function pick(value) {
+    if (value === picked && value === provider) return;
+    picked = value;
+    if (latest) {
+      vscode.setState({ data: latest, picked });
+      render(latest);
+      window.scrollTo(0, 0);
+    }
+  }
+
+  // troca de visão no topo e "Abrir painel" nos cartões da visão geral
+  document.addEventListener('click', (event) => {
+    const go = event.target.closest && event.target.closest('[data-go]');
+    if (go) pick(go.dataset.go);
+  });
+
   const prev = vscode.getState();
-  if (prev) render(prev);
+  if (prev) {
+    // `provider` era o nome da chave antes da visão geral ser o padrão
+    picked = prev.picked || prev.provider || 'all';
+    // versões antigas gravavam o payload direto no estado; sem payload nenhum,
+    // espera o próximo poll em vez de renderizar um objeto vazio
+    const data = prev.data || (prev.day ? prev : null);
+    if (data) render(data);
+  }
   vscode.postMessage({ type: 'ready' });
 })();

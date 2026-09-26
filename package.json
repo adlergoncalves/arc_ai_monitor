@@ -1,8 +1,8 @@
 {
   "name": "arc-ai-monitor",
   "displayName": "Arc AI Monitor",
-  "description": "Monitor de uso do Claude Code dentro do VS Code: cotas oficiais da conta, sessoes ativas e consumo do dia. Le arquivos locais, nao gasta tokens.",
-  "version": "1.0.2",
+  "description": "Monitor de uso do Claude Code e Codex dentro do VS Code: cotas oficiais, sessoes ativas e consumo do dia. Le arquivos locais, nao gasta tokens.",
+  "version": "1.0.3",
   "publisher": "AdlerGoncalves",
   "author": {
     "name": "Adler Gonçalves"
@@ -21,6 +21,7 @@
   "keywords": [
     "claude",
     "claude code",
+    "codex",
     "arc",
     "uso",
     "tokens",

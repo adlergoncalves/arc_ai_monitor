@@ -1,14 +1,14 @@
 # Arc AI Monitor
 
-Monitor de uso do Claude Code dentro do VS Code. Nada aqui gasta token: são
-arquivos que o Claude Code já grava no seu disco, mais uma consulta de
-**saldo** (não de inferência) ao mesmo endpoint que alimenta o `/usage`.
+Monitor de uso do Claude Code e do Codex dentro do VS Code. Nada aqui gasta
+token: são arquivos que o Claude Code já grava no seu disco, mais consultas de
+**saldo** (não de inferência) às interfaces oficiais das duas ferramentas.
 
 ## Três formas de olhar
 
 | Onde | O que mostra |
 |------|--------------|
-| **Barra de status** | `● 5h 37% · 7d 33%` — cotas de relance, com tooltip completa (cotas com reset, consumo do dia, sessões) |
+| **Barra de status** | `✳ Claude 5h 37% · ◎ Codex 5 h 64%` — cotas identificadas por ferramenta, com tooltip completa |
 | **Barra lateral** (ícone do reator na Activity Bar) | o painel em coluna estreita, sempre à vista ao lado do código |
 | **Painel** (aba do editor) | a central completa: KPIs, sessões ao vivo, gráficos de 24h e do histórico, rankings |
 
@@ -18,7 +18,8 @@ lateral secundária (direita) — onde ficar melhor.
 ## O que o painel mostra
 
 - **Faixa de KPIs** — cotas oficiais da conta (com reset e filete de nível) e
-  os números do dia: saída, total movimentado e equivalente em API.
+  os números do dia: saída, total movimentado e equivalente em API para Claude
+  ou turnos para Codex.
 - **Sessões ativas** — uma linha por sessão viva: projeto, título, branch,
   modelo, barra de contexto vs. a janela do modelo, saída/turnos/custo. O
   trilho à esquerda acende quando a sessão está gerando tokens. Sessões que
@@ -30,13 +31,39 @@ lateral secundária (direita) — onde ficar melhor.
 
 ## De onde vêm os números
 
-**Cotas** são os valores **oficiais** — os mesmos do `/usage`. Vêm de
+As cotas do **Claude** são os valores **oficiais** — os mesmos do `/usage`. Vêm de
 `api.anthropic.com/api/oauth/usage`, usando o token que o Claude Code já
 mantém: `~/.claude/.credentials.json` quando esse arquivo existe (Windows) ou,
 quando não existe, o Keychain do sistema (macOS). Esse endpoint **não faz
 inferência**: não gasta tokens nem consome cota. As credenciais são **só
 lidas, nunca reescritas**; se o token expirar ou a rede cair, o painel volta
 sozinho ao cache local (`~/.claude.json`).
+
+As cotas do **Codex** são lidas pelo `codex app-server` local, a mesma interface
+autenticada usada pelas integrações do Codex. Elas aparecem como `Codex · 5 h`,
+`Codex · 1 sem` ou outras janelas que a sua conta disponibilizar. Nenhum token,
+prompt ou código é enviado pelo monitor; se o Codex não estiver instalado ou
+logado, as cotas dele simplesmente não aparecem.
+
+Durante o uso, as cotas do Codex andam **turno a turno**: a cada resposta o
+servidor devolve o saldo, e o Codex o grava nos JSONL de `~/.codex/sessions`. O
+monitor usa o retrato mais novo entre esse e a consulta ao app-server — sem
+nenhuma consulta extra. Esses registros são lidos de forma incremental (só o
+trecho novo de cada arquivo), como os transcripts do Claude.
+
+Os turnos e tokens do Codex vêm dos JSONL locais em `~/.codex/sessions`.
+O painel Codex usa a mesma estrutura do Claude: consumo do dia, sessões,
+gráfico horário, composição, histórico e rankings por projeto/modelo. O custo
+equivalente em API não é estimado para Codex.
+
+A **Visão geral** aparece só para quem usa as duas ferramentas (quem usa uma
+só vai direto para o painel dela, sem seletor). Ela mostra, de cima para baixo:
+um cartão por conta com a situação em uma frase (com folga / atenção / no
+limite), as cotas com reset e o consumo do dia; a saída por hora das duas
+empilhadas, com a divisão do dia; as sessões ativas das duas numa lista só; e o
+histórico, projetos e modelos do período, com a divisão entre as ferramentas.
+Nos gráficos que comparam as duas, Claude é menta e Codex é violeta — o painel
+Codex adota o violeta como acento pelo mesmo motivo.
 
 O intervalo entre consultas (padrão 150s) é respeitado **entre todas as
 janelas do VS Code** — o resultado é compartilhado em
@@ -77,17 +104,18 @@ máquina" e a primeira coluna vira atividade local.
 
 ## Privacidade
 
-Tudo é local. A única chamada de rede é a consulta de saldo à Anthropic, feita
-com o token do próprio usuário logado na máquina. Nenhum dado sai para
-qualquer outro lugar, e nenhuma credencial (OAuth ou OTel) aparece na
+Os registros de uso ficam locais. A consulta de saldo do Claude é feita à
+Anthropic com o token já presente na máquina. As cotas Codex são pedidas ao
+app-server local, que usa a autenticação existente. Nenhum prompt ou código
+é enviado pelo monitor, e nenhuma credencial (OAuth ou OTel) aparece na
 interface.
 
 ## Instalar
 
 Na aba **Extensions** (`Ctrl+Shift+X`), busque **Arc AI Monitor** e instale.
 
-Requisito: **Claude Code instalado e logado** na máquina — é de lá que saem
-todos os dados.
+Requisito: **Claude Code ou Codex instalado e logado** na máquina, conforme a
+ferramenta que você quer acompanhar.
 
 ### Compatibilidade
 

@@ -99,9 +99,10 @@ export class StatusBar implements vscode.Disposable {
       return [{ text: '$(pulse) Claude', sev: 0 }];
     }
 
-    const bars = d.account.bars;
+    const bars = [...d.account.bars, ...(d.codex?.bars ?? [])];
     const byKind = new Map(bars.map((b) => [b.kind, b]));
     const out: Piece[] = [];
+    let firstClaude = true;
 
     for (const key of this.options.show) {
       switch (key) {
@@ -123,9 +124,10 @@ export class StatusBar implements vscode.Disposable {
             }
           }
           out.push({
-            text: `${abbr} ${this.gauge(b.percent)}${pct(b.percent)}`,
+            text: `✳ ${firstClaude ? 'Claude ' : ''}${abbr} ${this.gauge(b.percent)}${pct(b.percent)}`,
             sev: SEV_RANK[(b.severity || 'normal').toLowerCase()] ?? 0,
           });
+          firstClaude = false;
           break;
         }
         case 'spend': {
@@ -134,7 +136,7 @@ export class StatusBar implements vscode.Disposable {
             break;
           }
           out.push({
-            text: `cred ${this.gauge(s.percent)}${pct(s.percent)}`,
+            text: `✳ cred ${this.gauge(s.percent)}${pct(s.percent)}`,
             sev: SEV_RANK[(s.severity || 'normal').toLowerCase()] ?? 0,
           });
           break;
@@ -143,7 +145,7 @@ export class StatusBar implements vscode.Disposable {
           out.push({ text: short(d.day.output), sev: 0 });
           break;
         case 'day_cost':
-          out.push({ text: `US$ ${Math.round(d.day.cost)}`, sev: 0 });
+          out.push({ text: `✳ US$ ${Math.round(d.day.cost)}`, sev: 0 });
           break;
         case 'sessions':
           out.push({ text: `${d.active} ses`, sev: 0 });
@@ -151,15 +153,22 @@ export class StatusBar implements vscode.Disposable {
       }
     }
 
+    // O Codex tem baldes dinamicos (a conta pode ter um ou mais), por isso
+    // entram todos no fim, com o prefixo CX, sem depender de nomes internos.
+    for (const [i, b] of (d.codex?.bars ?? []).entries()) {
+      out.push({
+        text: `◎ ${i === 0 ? 'Codex ' : ''}${b.label.replace('Codex · ', '')} ${this.gauge(b.percent)}${pct(b.percent)}`,
+        sev: SEV_RANK[(b.severity || 'normal').toLowerCase()] ?? 0,
+      });
+    }
+
     if (out.length === 0) {
-      out.push({ text: 'Claude', sev: 0 });
+      out.push({ text: d.codex ? '✳ Claude  ◎ Codex' : '✳ Claude', sev: 0 });
     }
 
     // circulo cheio = numero veio da consulta oficial; vazio = cache local.
     // O icone mora no primeiro item.
-    const fresh = d.account.source === 'live';
-    const icon = d.error ? '$(warning)' : fresh ? '$(circle-filled)' : '$(circle-outline)';
-    out[0] = { ...out[0], text: `${icon} ${out[0].text}` };
+    if (d.error) out[0] = { ...out[0], text: `$(warning) ${out[0].text}` };
     return out;
   }
 
@@ -230,6 +239,15 @@ export class StatusBar implements vscode.Disposable {
       }
       md.appendMarkdown('\n');
     }
+    if (d.codex?.bars.length) {
+      const codexSrc = d.codex.source === 'live' ? 'consulta oficial' : 'última consulta disponível';
+      const codexAge = d.codex.age_s != null ? ` · lido ${ago(d.codex.age_s)} atrás` : '';
+      md.appendMarkdown(`**Codex — ${codexSrc}${codexAge}**\n\n| cota | uso | |\n|---|---:|---|\n`);
+      for (const b of d.codex.bars) {
+        md.appendMarkdown(`| ${b.label} | ${pct(b.percent)} | ${until(b.resets_at)} |\n`);
+      }
+      md.appendMarkdown('\n');
+    }
     const sp = d.account.spend;
     if (sp) {
       md.appendMarkdown(
@@ -237,19 +255,35 @@ export class StatusBar implements vscode.Disposable {
       );
     }
 
-    md.appendMarkdown(
-      `**Hoje** — ${short(d.day.output)} de saída · US$ ${Math.round(d.day.cost)} equiv. API · ${fmt(d.day.turns)} turnos\n\n`,
-    );
+    // o total do dia soma as duas ferramentas, mas o custo e so do Claude:
+    // com Codex ativo, cada uma ganha a propria linha
+    const cx = d.day.providers?.codex;
+    const cl = d.day.providers?.claude;
+    if (cx && cx.turns > 0) {
+      const lines = [];
+      if (cl && cl.turns > 0) {
+        lines.push(`✳ Claude ${short(cl.output)} de saída · US$ ${Math.round(cl.cost)} equiv. API · ${fmt(cl.turns)} turnos`);
+      }
+      lines.push(`◎ Codex ${short(cx.output)} de saída · ${fmt(cx.turns)} turnos`);
+      md.appendMarkdown(`**Hoje** — ${lines.join('  \n')}\n\n`);
+    } else {
+      md.appendMarkdown(
+        `**Hoje** — ${short(d.day.output)} de saída · US$ ${Math.round(d.day.cost)} equiv. API · ${fmt(d.day.turns)} turnos\n\n`,
+      );
+    }
 
     if (d.sessions.length > 0) {
       md.appendMarkdown(
         `**${d.sessions.length} ${d.sessions.length === 1 ? 'sessão ativa' : 'sessões ativas'}**\n\n`,
       );
       for (const s of d.sessions.slice(0, 8)) {
-        const ctx = d.ctx_max > 0 ? Math.round((s.context / d.ctx_max) * 100) : 0;
+        // sessao Codex informa a propria janela de contexto
+        const cap = s.context_max || d.ctx_max;
+        const ctx = cap > 0 ? Math.round((s.context / cap) * 100) : 0;
         const hot = s.idle != null && s.idle < 90 ? '$(circle-filled) ' : '';
+        const tool = s.provider === 'codex' ? '◎' : '✳';
         md.appendMarkdown(
-          `- ${hot}\`${s.product || s.name}\`${s.here ? ' _(aqui)_' : ''} · ${s.model || '?'} · ${ago(s.idle)} · ctx ${ctx}%\n`,
+          `- ${hot}${tool} \`${s.product || s.name}\`${s.here ? ' _(aqui)_' : ''} · ${s.model || '?'} · ${ago(s.idle)} · ctx ${ctx}%\n`,
         );
       }
       if (d.sessions.length > 8) {

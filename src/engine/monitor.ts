@@ -11,6 +11,8 @@ import { History } from './history';
 import { mergePricing, PriceTable } from './pricing';
 import { isAlive, readSessions } from './sessions';
 import { QuotaReader } from './quota';
+import { CodexReader } from './codex';
+import { CodexUsageReader } from './codexUsage';
 import { TelemetryReader } from './telemetry';
 import {
   fileMeta,
@@ -45,6 +47,8 @@ export class Monitor {
   private table: PriceTable;
   private pricingSource: unknown;
   private readonly quota: QuotaReader;
+  private readonly codex: CodexReader;
+  private readonly codexUsage = new CodexUsageReader();
   private readonly history: History;
   private readonly telemetry = new TelemetryReader();
   private lastData: LiveData | undefined;
@@ -58,6 +62,7 @@ export class Monitor {
     this.pricingSource = cfg.pricing;
     this.table = mergePricing(cfg.pricing);
     this.quota = new QuotaReader(() => this.getConfig().quotaTtl * 1000);
+    this.codex = new CodexReader(() => this.getConfig().quotaTtl * 1000);
     this.history = new History(() => this.getConfig().historyDays);
   }
 
@@ -192,6 +197,7 @@ export class Monitor {
         sid: meta.sessionId,
         short: meta.sessionId.slice(0, 8),
         name: meta.name || meta.sessionId.slice(0, 8),
+        provider: 'claude',
         title: fm.title,
         branch: fm.branch,
         product: path.basename(cwdFull.replace(/[\\/]+$/, '')) || meta.name || '',
@@ -211,10 +217,49 @@ export class Monitor {
         sub_output: subOut,
       });
     }
+    const codexUsage = await this.codexUsage.read(todayLocal, dirs, cfg.historyDays, now.getTime());
+    cards.push(...codexUsage.sessions);
     cards.sort((a, b) => (a.idle ?? Number.MAX_SAFE_INTEGER) - (b.idle ?? Number.MAX_SAFE_INTEGER));
 
     // ── acumulado do dia + historico ───────────────────────────────────
     const day = await this.buildDay(entries, todayLocal);
+    const claudeDay = {
+      output: day.output,
+      total: day.comp.total,
+      turns: day.turns,
+      cost: day.cost,
+      comp: { ...day.comp },
+      hours: day.hours.map((item) => ({ ...item })),
+      models: day.models.map((item) => ({ ...item })),
+    };
+    day.output += codexUsage.day.o;
+    day.turns += codexUsage.day.turns;
+    day.comp.i += codexUsage.day.i;
+    day.comp.o += codexUsage.day.o;
+    day.comp.cw += codexUsage.day.cw;
+    day.comp.cr += codexUsage.day.cr;
+    day.comp.total += codexUsage.day.total;
+    for (const hour of day.hours) {
+      hour.o += codexUsage.day.hours.get(hour.h) ?? 0;
+    }
+    for (const [model, output] of codexUsage.day.models) {
+      const row = day.models.find((item) => item.n === model);
+      if (row) row.o += output;
+      else day.models.push({ n: model, o: output });
+    }
+    day.models.sort((a, b) => b.o - a.o);
+    day.providers = {
+      claude: claudeDay,
+      codex: {
+        output: codexUsage.day.o,
+        total: codexUsage.day.total,
+        turns: codexUsage.day.turns,
+        cost: 0,
+        comp: { i: codexUsage.day.i, o: codexUsage.day.o, cw: codexUsage.day.cw, cr: codexUsage.day.cr, total: codexUsage.day.total },
+        hours: Array.from({ length: 24 }, (_, h) => ({ h, o: codexUsage.day.hours.get(h) ?? 0 })),
+        models: [...codexUsage.day.models.entries()].map(([n, o]) => ({ n, o })).sort((a, b) => b.o - a.o),
+      },
+    };
     this.history.update(entries, this.table);
 
     if (now.getTime() - this.lastPrune > 3600_000) {
@@ -222,14 +267,20 @@ export class Monitor {
       pruneCache(now.getTime());
     }
 
+    // em paralelo: a consulta Claude (rede/Keychain) e a do Codex (app-server
+    // local) nao dependem uma da outra
+    const [account, codex] = await Promise.all([this.quota.account(), this.codex.account(codexUsage.limits)]);
+
     return {
       now: now.toTimeString().slice(0, 8),
       date: todayLocal,
-      account: await this.quota.account(),
+      account,
+      codex,
       sessions: cards,
       active: cards.length,
       day,
       history: this.history.snapshot(),
+      codexHistory: codexUsage.history,
       telemetry: await this.telemetry.read(),
       every_ms: this.busy ? cfg.refreshInterval : cfg.idleRefreshInterval,
       ctx_max: cfg.contextWindow,

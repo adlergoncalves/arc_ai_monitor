@@ -38,7 +38,16 @@ export function buildHtml(
   <header class="top">
     ${reactorSvg()}
     <span class="wordmark">ARC AI</span>
-    <span class="fresh" id="fresh"></span>
+    <span class="freshes" id="freshes">
+      <span class="fresh" id="fresh-claude"></span>
+      <span class="fresh" id="fresh-codex"></span>
+    </span>
+    <!-- troca de visão: só aparece para quem usa as duas ferramentas -->
+    <nav class="views" id="views" aria-label="Visão exibida" hidden>
+      <button type="button" data-go="all" aria-pressed="false"><em class="sw claude"></em><em class="sw codex"></em>GERAL</button>
+      <button type="button" data-go="claude" aria-pressed="false"><em class="sw claude"></em>CLAUDE</button>
+      <button type="button" data-go="codex" aria-pressed="false"><em class="sw codex"></em>CODEX</button>
+    </nav>
     <span class="spacer"></span>
     <!-- agrupado para a coluna estreita poder descer TUDO junto para a
          segunda linha, em vez de quebrar no meio de "QUINTA-FEIRA" -->
@@ -61,22 +70,67 @@ export function buildHtml(
     </div>
     <div class="k" id="k_out">
       <div class="knum"><b id="d-out">—</b><i id="d-unit"></i></div>
-      <div class="klbl">SAÍDA HOJE</div>
+      <div class="klbl" id="d-out-label">SAÍDA HOJE</div>
       <div class="kfoot" id="d-turns"></div>
     </div>
     <div class="k" id="k_mov">
       <div class="knum"><b id="d-mov">—</b><i id="d-movu"></i></div>
-      <div class="klbl">MOVIMENTADO</div>
+      <div class="klbl" id="d-mov-label">MOVIMENTADO</div>
       <div class="kfoot">entrada + cache + saída</div>
     </div>
     <div class="k" id="k_cost">
-      <div class="knum"><b id="d-cost">—</b><i>US$</i></div>
-      <div class="klbl">EQUIVALENTE API</div>
-      <div class="kfoot">estimativa, não fatura</div>
+      <div class="knum"><b id="d-cost">—</b><i id="d-cost-unit">US$</i></div>
+      <div class="klbl" id="d-cost-label">EQUIVALENTE API</div>
+      <div class="kfoot" id="d-cost-foot">estimativa, não fatura</div>
     </div>
   </div>
 
-  <div class="grid-main">
+  <!-- Visao geral: so existe para quem usa as duas ferramentas. Le de cima
+       para baixo: situacao de cada conta -> o dia lado a lado -> o periodo. -->
+  <div class="overview" id="overview" hidden>
+    <div class="ov-accounts">
+      ${providerCard('claude', 'CLAUDE')}
+      ${providerCard('codex', 'CODEX')}
+    </div>
+
+    <div class="grid-main">
+      <section class="panel">
+        <h2 class="with-legend"><span>HOJE · SAÍDA POR HORA</span><span class="legend" id="ov-h-legend"></span></h2>
+        <div class="chart" id="ov-h-chart"></div>
+        <div class="axis"><span>0h</span><span>6h</span><span>12h</span><span>18h</span><span>23h</span></div>
+        <div class="ov-split">
+          <div class="tsub">DIVISÃO DE HOJE</div>
+          <div class="splits" id="ov-split-today"></div>
+        </div>
+      </section>
+      <section class="panel">
+        <h2><span id="ov-s-count">SESSÕES</span><span class="who" id="ov-s-note"></span></h2>
+        <div class="ov-sessions" id="ov-sessions"></div>
+      </section>
+    </div>
+
+    <div class="grid-hist wide-only">
+      <section class="panel">
+        <h2 class="with-legend"><span id="ov-d-title">HISTÓRICO · SAÍDA POR DIA</span><span class="legend" id="ov-d-legend"></span></h2>
+        <div class="chart" id="ov-d-chart"></div>
+        <div class="hscale" id="ov-d-scale"></div>
+        <div class="ov-split">
+          <div class="tsub">DIVISÃO NO PERÍODO</div>
+          <div class="splits" id="ov-split-period"></div>
+        </div>
+      </section>
+      <section class="panel">
+        <h2><span>POR PROJETO</span><span class="who">saída no período</span></h2>
+        <div class="rank" id="ov-projects"></div>
+      </section>
+      <section class="panel">
+        <h2><span>POR MODELO</span><span class="who">saída no período</span></h2>
+        <div class="rank" id="ov-models"></div>
+      </section>
+    </div>
+  </div>
+
+  <div class="grid-main" id="live-grid">
     <section class="panel">
       <h2><span id="sess-count">—</span><span class="who" id="sess-note"></span></h2>
       <div class="sessions" id="cards"></div>
@@ -93,7 +147,7 @@ export function buildHtml(
     </section>
   </div>
 
-  <div class="grid-hist wide-only">
+  <div class="grid-hist wide-only" id="hist-grid">
     <section class="panel">
       <h2><span id="h-title">HISTÓRICO</span><span class="who" id="h-sum"></span></h2>
       <div class="chart" id="h-chart"></div>
@@ -127,23 +181,64 @@ export function buildHtml(
     </div>
   </section>
 
-  <footer>
-    <b>Cotas da conta</b> são os números oficiais — os mesmos do <code>/usage</code>. Vêm de uma
+  <section class="panel wide-only" id="codex-detail" hidden>
+    <h2><span>INFORMAÇÕES ADICIONAIS · CODEX</span><span class="who">registros locais + cotas da conta</span></h2>
+    <div class="telgrid">
+      <div class="telcol"><div class="tsub">CONSUMO DE HOJE · DESTA MÁQUINA</div><div class="trows" id="cx-usage"></div></div>
+      <div class="telcol"><div class="tsub">CONTA E COTAS · CODEX APP-SERVER</div><div class="trows" id="cx-account"></div></div>
+      <div class="telcol"><div class="tsub">HISTÓRICO LOCAL · JANELA CONFIGURADA</div><div class="trows" id="cx-history"></div></div>
+    </div>
+  </section>
+
+  <footer id="panel-footer">
+    <span id="footer-claude">
+    <b>Cotas do Claude</b> são os números oficiais — os mesmos do <code>/usage</code>. Vêm de uma
     consulta direta a <code>api.anthropic.com/api/oauth/usage</code> com o token que o Claude Code
     já mantém no disco; esse endpoint não faz inferência, então <b>não gasta tokens nem consome
     cota</b>. Se o token expirar ou a rede cair, o painel volta sozinho a ler o cache local em
-    <code>~/.claude.json</code> — aí o ponto ao lado de CLAUDE fica vazio e mostra a idade do dado.
+    <code>~/.claude.json</code>.
     <br>
     <b>Consumo</b> e <b>sessões</b> vêm dos transcripts em <code>~/.claude/projects</code> e das
     sessões em <code>~/.claude/sessions</code>; o uso é gravado <b>ao fim de cada turno</b>, então
     durante uma resposta longa o número fica parado e salta quando ela termina. O valor em dólar é
     o <b>equivalente em API pay-per-token</b> — referência de peso, não fatura.
+    </span>
+    <span id="footer-codex">
+      <b>Cotas e consumo do Codex</b> vêm do <code>codex app-server</code> e dos registros locais em
+      <code>~/.codex/sessions</code>. O monitor lê somente dados já mantidos pelo Codex; não envia
+      prompts, código ou credenciais.
+    </span>
   </footer>
 </div>
 <div class="tip" id="tip" hidden></div>
 <script nonce="${nonce}" src="${js}"></script>
 </body>
 </html>`;
+}
+
+/**
+ * Cartao de uma conta na visao geral. Os dois sao identicos de proposito:
+ * mesma posicao para a mesma informacao, e a comparacao se faz no olho.
+ */
+function providerCard(id: 'claude' | 'codex', name: string): string {
+  return `<section class="panel ov-card ${id}" id="ov-${id}">
+        <h2><span class="ov-name"><em class="sw ${id}"></em>${name}</span><span class="who" id="ov-${id}-who"></span></h2>
+        <div class="ov-state">
+          <span class="ov-headroom" id="ov-${id}-state"></span>
+          <span class="fresh" id="ov-${id}-fresh"></span>
+        </div>
+        <div class="ov-quotas" id="ov-${id}-quotas"></div>
+        <div class="ov-stats">
+          <div><b id="ov-${id}-out">—</b><span>SAÍDA HOJE</span></div>
+          <div><b id="ov-${id}-mov">—</b><span>MOVIMENTADO</span></div>
+          <div><b id="ov-${id}-turns">—</b><span>TURNOS HOJE</span></div>
+          <div><b id="ov-${id}-sess">—</b><span id="ov-${id}-sess-l">SESSÕES</span></div>
+        </div>
+        <div class="ov-foot">
+          <span id="ov-${id}-foot"></span>
+          <button class="ov-open" type="button" data-go="${id}">Abrir painel ${name.charAt(0)}${name.slice(1).toLowerCase()} →</button>
+        </div>
+      </section>`;
 }
 
 /**

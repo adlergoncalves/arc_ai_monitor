@@ -27,6 +27,8 @@ export interface FileMeta {
 
 export interface QuotaBar {
   kind: string;
+  /** ferramenta que forneceu esta cota; nunca inferida pelo webview */
+  provider?: 'claude' | 'codex';
   group?: string | null;
   label: string;
   percent: number | null;
@@ -61,6 +63,7 @@ export interface SessionCard {
   sid: string;
   short: string;
   name: string;
+  provider?: 'claude' | 'codex';
   /** titulo que o proprio Claude Code gera conforme a conversa evolui */
   title?: string;
   branch?: string;
@@ -70,6 +73,8 @@ export interface SessionCard {
   model: string;
   output: number;
   context: number;
+  /** janela de contexto informada pelo Codex para esta sessão */
+  context_max?: number;
   cost: number;
   turns: number;
   idle: number | null;
@@ -151,17 +156,30 @@ export interface DaySlice {
   /** composicao do que circulou hoje: entrada, saida, cache write, cache read */
   comp: { i: number; o: number; cw: number; cr: number; total: number };
   wire: DayWire;
+  /** subtotal local por ferramenta; o total acima é a soma deles */
+  providers?: Record<'claude' | 'codex', {
+    output: number;
+    total: number;
+    turns: number;
+    cost: number;
+    comp: { i: number; o: number; cw: number; cr: number; total: number };
+    hours: { h: number; o: number }[];
+    models: { n: string; o: number }[];
+  }>;
 }
 
 export interface LiveData {
   now: string;
   date: string;
   account: Account;
+  /** cotas oficiais do Codex, quando ele estiver instalado e autenticado */
+  codex?: Account;
   sessions: SessionCard[];
   active: number;
   day: DaySlice;
   /** ausente enquanto a primeira varredura nao termina */
   history?: HistorySnapshot;
+  codexHistory?: HistorySnapshot;
   telemetry?: TelemetryStatus;
   /** intervalo de poll em vigor, so para o rodape do painel */
   every_ms: number;

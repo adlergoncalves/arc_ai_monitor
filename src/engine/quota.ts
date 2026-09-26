@@ -20,10 +20,12 @@
  * `429 rate_limit_error` e todo mundo ficaria preso ao cache. Com o cache
  * compartilhado, N janelas geram no maximo uma consulta por TTL.
  */
-import { execFile } from 'child_process';
+import { createHash } from 'crypto';
+import * as os from 'os';
+import { ExecException, execFile } from 'child_process';
 import * as fs from 'fs/promises';
 import * as https from 'https';
-import { CONFIG_FILE, CREDS_FILE, QUOTA_CACHE, QUOTA_LOCK } from './paths';
+import { CLAUDE_DIR, CONFIG_FILE, CREDS_FILE, QUOTA_CACHE, QUOTA_LOCK } from './paths';
 import { Account, QuotaBar, Spend } from './types';
 
 const QUOTA_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -44,6 +46,8 @@ const KIND_PT: Record<string, string> = {
 interface LiveRecord {
   at: number;
   waitMs: number;
+  fetchedAt?: number;
+  error?: string;
   bars: QuotaBar[];
   spend: Spend | null;
   sub?: string;
@@ -70,6 +74,7 @@ export function parseUtilization(util: any): { bars: QuotaBar[]; spend: Spend | 
     }
     bars.push({
       kind,
+      provider: 'claude',
       group: lim.group ?? null,
       label,
       percent: typeof lim.percent === 'number' ? lim.percent : null,
@@ -83,11 +88,14 @@ export function parseUtilization(util: any): { bars: QuotaBar[]; spend: Spend | 
     for (const [key, label] of [
       ['five_hour', 'Sessão (5h)'],
       ['seven_day', 'Semanal (7 dias)'],
+      ['seven_day_opus', 'Semanal Opus'],
+      ['seven_day_sonnet', 'Semanal Sonnet'],
     ] as const) {
       const blk = util?.[key];
       if (blk && typeof blk === 'object' && blk.utilization != null) {
         bars.push({
-          kind: key,
+          kind: ({ five_hour: 'session', seven_day: 'weekly_all', seven_day_opus: 'weekly_opus', seven_day_sonnet: 'weekly_scoped' })[key],
+          provider: 'claude',
           group: key,
           label,
           percent: typeof blk.utilization === 'number' ? blk.utilization : null,
@@ -159,7 +167,7 @@ export class QuotaReader {
 
     const q = this.live;
     if (q && (q.bars.length > 0 || q.spend)) {
-      const age = Math.floor((Date.now() - q.at) / 1000);
+      const age = Math.floor((Date.now() - (q.fetchedAt ?? q.at)) / 1000);
       // se a consulta ao vivo esta mais velha que o cache do Claude Code, o
       // cache passou a ser a melhor informacao
       if (base.age_s != null && base.age_s < age && base.bars.length > 0) {
@@ -169,7 +177,8 @@ export class QuotaReader {
         ...base,
         bars: q.bars.length > 0 ? q.bars : base.bars,
         spend: q.spend !== null ? q.spend : base.spend,
-        source: 'live',
+        source: q.error ? 'cache' : 'live',
+        fetched_ms: q.fetchedAt ?? q.at,
         age_s: age,
         account: q.sub,
       };
@@ -185,15 +194,22 @@ export class QuotaReader {
     } catch {
       return undefined;
     }
+    // a idade e recalculada a cada leitura: congelada, o cache parecia mais
+    // novo que a consulta ao vivo e o painel voltava para ele
+    const aged = (acct: Account): Account => ({
+      ...acct,
+      age_s: acct.fetched_ms ? Math.floor((Date.now() - acct.fetched_ms) / 1000) : null,
+    });
     if (this.cfgData && st.mtimeMs === this.cfgMtime) {
-      return this.cfgData;
+      return aged(this.cfgData);
     }
 
     let cfg: any;
     try {
       cfg = JSON.parse(await fs.readFile(CONFIG_FILE, 'utf8'));
     } catch {
-      return this.cfgData; // arquivo sendo reescrito: fica com o anterior
+      // arquivo sendo reescrito: fica com o anterior
+      return this.cfgData && aged(this.cfgData);
     }
 
     const cu = cfg?.cachedUsageUtilization ?? {};
@@ -243,12 +259,16 @@ export class QuotaReader {
         if (!this.live || rec.at > this.live.at) {
           this.live = {
             at: rec.at,
+            fetchedAt: rec.fetchedAt ?? rec.at,
+            error: rec.error,
             waitMs: typeof rec.waitMs === 'number' ? rec.waitMs : this.ttlMs(),
-            bars: Array.isArray(rec.bars) ? rec.bars : [],
+            // caches criados antes da marca de provider pertencem ao Claude.
+            bars: Array.isArray(rec.bars) ? rec.bars.map((bar) => ({ ...bar, provider: bar.provider ?? 'claude' })) : [],
             spend: rec.spend ?? null,
             sub: rec.sub,
           };
           this.triedOnce = true;
+          this.lastError = rec.error;
         }
       }
       this.sharedMtime = st.mtimeMs;
@@ -271,6 +291,7 @@ export class QuotaReader {
 
   private async acquireLock(retry = true): Promise<boolean> {
     try {
+      await fs.mkdir(CLAUDE_DIR, { recursive: true });
       const fh = await fs.open(QUOTA_LOCK, 'wx');
       await fh.writeFile(String(process.pid));
       await fh.close();
@@ -310,7 +331,8 @@ export class QuotaReader {
         return; // outra janela ja esta cuidando disso
       }
       try {
-        await this.fetchLive();
+        await this.syncShared();
+        if (!this.live || Date.now() - this.live.at >= this.live.waitMs) await this.fetchLive();
       } finally {
         await this.releaseLock();
       }
@@ -321,24 +343,26 @@ export class QuotaReader {
 
   private async fetchLive(): Promise<void> {
     const prevWait = this.live?.waitMs ?? this.ttlMs();
-    const fail = (err: string, hard: boolean) => {
+    const fail = async (err: string, hard: boolean) => {
       this.lastError = err;
       // guarda o recuo TAMBEM no arquivo compartilhado, para as outras
       // janelas respeitarem o mesmo silencio
       const rec: LiveRecord = {
         at: Date.now(),
+        fetchedAt: this.live?.fetchedAt ?? this.live?.at ?? 0,
+        error: err,
         waitMs: hard ? Math.min(prevWait * 2, BACKOFF_MAX_MS) : this.ttlMs(),
         bars: this.live?.bars ?? [],
         spend: this.live?.spend ?? null,
         sub: this.live?.sub,
       };
       this.live = rec;
-      void this.writeShared(rec);
+      await this.writeShared(rec);
     };
 
-    const token = await readToken();
-    if (!token) {
-      fail('token ausente ou expirado', false);
+    let token: Token;
+    try { token = await readToken(); } catch (e) {
+      await fail((e as Error).message, false);
       return;
     }
 
@@ -352,7 +376,7 @@ export class QuotaReader {
       });
     } catch (e) {
       const msg = (e as Error).message || 'erro de rede';
-      fail(msg, true);
+      await fail(msg, true);
       return;
     }
 
@@ -360,19 +384,20 @@ export class QuotaReader {
     try {
       util = JSON.parse(body);
     } catch {
-      fail('resposta ilegivel', true);
+      await fail('resposta ilegivel', true);
       return;
     }
 
     const { bars, spend } = parseUtilization(util);
     if (bars.length === 0 && !spend) {
-      fail('resposta sem cotas', true);
+      await fail('resposta sem cotas', true);
       return;
     }
 
     this.lastError = undefined;
     const rec: LiveRecord = {
       at: Date.now(),
+      fetchedAt: Date.now(),
       waitMs: this.ttlMs(), // sucesso: volta ao intervalo normal
       bars,
       spend,
@@ -392,10 +417,11 @@ interface Token {
  * O payload e o MESMO nos dois lugares (arquivo ou Keychain): um JSON com
  * `claudeAiOauth`. So muda de onde o texto vem.
  */
-function parseToken(raw: string): Token | undefined {
+export function parseToken(raw: string): Token | undefined {
   let data: any;
   try {
-    data = JSON.parse(raw);
+    const value = raw.trim();
+    data = JSON.parse(/^(?:[0-9a-f]{2})+$/i.test(value) ? Buffer.from(value, 'hex').toString('utf8') : value);
   } catch {
     return undefined;
   }
@@ -414,34 +440,58 @@ function parseToken(raw: string): Token | undefined {
  * onde o token existe quando `.credentials.json` nao foi escrito — caso
  * comum no macOS. Somente leitura, como o arquivo: nunca reescrevemos.
  */
-function readKeychainToken(): Promise<Token | undefined> {
-  return new Promise((resolve) => {
-    if (process.platform !== 'darwin') {
-      resolve(undefined);
-      return;
-    }
-    execFile(
-      'security',
-      ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'],
-      { timeout: 8000, maxBuffer: 1024 * 1024 },
-      (err, stdout) => {
-        // item ausente, Keychain trancado ou acesso negado: cai para o cache
-        resolve(err ? undefined : parseToken(stdout.trim()));
-      },
-    );
+export function keychainService(configDir = process.env.CLAUDE_CONFIG_DIR): string {
+  return KEYCHAIN_SERVICE + (configDir ? `-${createHash('sha256').update(configDir.normalize('NFC')).digest('hex').slice(0, 8)}` : '');
+}
+
+/** codigo de saida do `security` quando o item nao existe */
+const KEYCHAIN_NOT_FOUND = 44;
+
+function findPassword(args: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile('/usr/bin/security', ['find-generic-password', ...args, '-w'],
+      { timeout: 30_000, maxBuffer: 1024 * 1024 },
+      (err, stdout) => (err ? reject(err) : resolve(stdout)));
   });
 }
 
-async function readToken(): Promise<Token | undefined> {
+function keychainError(e: unknown): Error {
+  const err = e as ExecException;
+  return new Error(err.killed ? 'Keychain: tempo de autorização esgotado' :
+    `Keychain: acesso indisponível (código ${err.code ?? 'desconhecido'}). Verifique a permissão no Acesso às Chaves.`);
+}
+
+async function readKeychainToken(): Promise<Token> {
+  const service = ['-s', keychainService()];
+  let stdout: string;
   try {
-    const fromFile = parseToken(await fs.readFile(CREDS_FILE, 'utf8'));
-    if (fromFile) {
-      return fromFile;
+    // com a conta: se houver itens antigos de outro usuario, pega o certo
+    stdout = await findPassword([...service, '-a', process.env.USER || os.userInfo().username]);
+  } catch (e) {
+    if ((e as ExecException).code !== KEYCHAIN_NOT_FOUND) {
+      throw keychainError(e);
     }
-  } catch {
-    // arquivo ausente: no macOS o token mora no Keychain
+    // conta gravada com outro nome: busca so pelo servico, como a 1.0.2
+    try { stdout = await findPassword(service); } catch (e2) { throw keychainError(e2); }
   }
-  return readKeychainToken();
+  const token = parseToken(stdout);
+  if (!token) {
+    throw new Error('Keychain: credencial inválida ou expirada. Faça login novamente no Claude Code.');
+  }
+  return token;
+}
+
+async function readToken(): Promise<Token> {
+  // No macOS o Keychain é a fonte principal; um arquivo antigo pode pertencer a outro login.
+  let keychainError: Error | undefined;
+  if (process.platform === 'darwin') {
+    try { return await readKeychainToken(); } catch (e) { keychainError = e as Error; }
+  }
+  try {
+    const token = parseToken(await fs.readFile(CREDS_FILE, 'utf8'));
+    if (token) return token;
+  } catch { /* credencial ausente */ }
+  throw keychainError ?? new Error('Credencial ausente ou expirada. Faça login no Claude Code.');
 }
 
 function httpGet(url: string, headers: Record<string, string>): Promise<string> {
