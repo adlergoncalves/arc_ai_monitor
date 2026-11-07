@@ -1,8 +1,8 @@
 {
   "name": "arc-ai-monitor",
   "displayName": "Arc AI Monitor",
-  "description": "Monitor de uso do Claude Code e Codex dentro do VS Code: cotas oficiais, sessoes ativas e consumo do dia. Le arquivos locais, nao gasta tokens.",
-  "version": "1.0.3",
+  "description": "Monitor de uso do Claude Code e Codex dentro do VS Code: cotas oficiais, sessoes ativas e consumo do dia, mais o mapa de agentes do Claude Code por worktree. Le arquivos locais, nao gasta tokens.",
+  "version": "1.1.0",
   "publisher": "AdlerGoncalves",
   "author": {
     "name": "Adler Gonçalves"
@@ -50,6 +50,13 @@
           "id": "arcAiMonitor.live",
           "name": "Ao vivo",
           "icon": "media/icon.svg"
+        },
+        {
+          "type": "webview",
+          "id": "arcAiMonitor.agents",
+          "name": "Agentes",
+          "icon": "media/agents/activity.svg",
+          "when": "arcAiMonitor.agents.enabled"
         }
       ]
     },
@@ -69,6 +76,17 @@
         "command": "arcAiMonitor.focusView",
         "title": "Mostrar na barra lateral",
         "category": "Arc AI Monitor"
+      },
+      {
+        "command": "arcAiMonitor.agents.open",
+        "title": "Abrir mapa de agentes",
+        "category": "Arc AI Monitor",
+        "icon": "$(type-hierarchy)"
+      },
+      {
+        "command": "arcAiMonitor.agents.refresh",
+        "title": "Atualizar agentes agora",
+        "category": "Arc AI Monitor"
       }
     ],
     "menus": {
@@ -78,9 +96,19 @@
           "when": "view == arcAiMonitor.live",
           "group": "navigation@1"
         }
+      ],
+      "commandPalette": [
+        {
+          "command": "arcAiMonitor.agents.open",
+          "when": "arcAiMonitor.agents.enabled"
+        },
+        {
+          "command": "arcAiMonitor.agents.refresh",
+          "when": "arcAiMonitor.agents.enabled"
+        }
       ]
     },
-    "configuration": {
+    "configuration": [{
       "title": "Arc AI Monitor",
       "properties": {
         "arcAiMonitor.refreshInterval": {
@@ -177,18 +205,47 @@
           "markdownDescription": "Sobrescreve a tabela de precos por MILHAO de tokens. Ex.: `{ \"opus\": { \"i\": 5, \"o\": 25, \"cw\": 6.25, \"cr\": 0.5 } }`. O que nao for informado usa a tabela embutida (oficial da Anthropic, conferida em 2026-07-30)."
         }
       }
-    }
+    },
+    {
+      "title": "Arc AI Monitor · Agentes",
+      "properties": {
+        "arcAiMonitorAgents.claudeHome": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Pasta de dados do Claude Code. Vazio = a mesma do monitor (`CLAUDE_CONFIG_DIR` ou `~/.claude`)."
+        },
+        "arcAiMonitorAgents.notifyWhenWaiting": {
+          "type": "boolean",
+          "default": true,
+          "description": "Avisar quando uma sessão parar esperando por você."
+        },
+        "arcAiMonitorAgents.refreshSeconds": {
+          "type": "number",
+          "default": 2,
+          "minimum": 1,
+          "description": "Intervalo de releitura das sessões, em segundos."
+        },
+        "arcAiMonitorAgents.recentSubagentMinutes": {
+          "type": "number",
+          "default": 15,
+          "minimum": 0,
+          "description": "Por quantos minutos um subagente concluído ou que falhou continua no mapa."
+        }
+      }
+    }]
   },
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "vscode:prepublish": "npm run compile",
+    "test": "vitest run",
     "package": "vsce package --out arc-ai-monitor.vsix"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/vscode": "^1.90.0",
     "@vscode/vsce": "^3.9.2",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^5.0.5"
   }
 }

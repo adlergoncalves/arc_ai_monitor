@@ -14,7 +14,7 @@ import * as vscode from 'vscode';
 export function buildHtml(
   webview: vscode.Webview,
   extensionUri: vscode.Uri,
-  opts: { compact: boolean; theme: string },
+  opts: { compact: boolean; theme: string; agents?: boolean },
 ): string {
   const nonce = makeNonce();
   const css = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'dashboard.css'));
@@ -38,6 +38,8 @@ export function buildHtml(
   <header class="top">
     ${reactorSvg()}
     <span class="wordmark">ARC AI</span>
+    <!-- antes do frescor: a chave fica no mesmo lugar nas duas áreas -->
+    ${opts.agents ? areasNav('monitor') : ''}
     <span class="freshes" id="freshes">
       <span class="fresh" id="fresh-claude"></span>
       <span class="fresh" id="fresh-codex"></span>
@@ -217,6 +219,20 @@ export function buildHtml(
 }
 
 /**
+ * Alterna entre o monitor e o mapa de agentes, na mesma aba do editor. So
+ * existe no painel e para quem tem o Claude Code (a area de agentes so
+ * acompanha ele). Mesmo controle segmentado da troca de visao; o mapa de
+ * agentes monta o mesmo topo com a outra opcao ativa.
+ */
+export function areasNav(active: 'monitor' | 'agents'): string {
+  const opt = (area: 'monitor' | 'agents', label: string) =>
+    area === active
+      ? `<button type="button" aria-pressed="true">${label}</button>`
+      : `<button type="button" data-area="${area}" aria-pressed="false">${label}</button>`;
+  return `<nav class="views areas" aria-label="Área exibida">${opt('monitor', 'MONITOR')}${opt('agents', 'AGENTES')}</nav>`;
+}
+
+/**
  * Cartao de uma conta na visao geral. Os dois sao identicos de proposito:
  * mesma posicao para a mesma informacao, e a comparacao se faz no olho.
  */
@@ -249,7 +265,7 @@ function providerCard(id: 'claude' | 'codex', name: string): string {
  * A sequencia de acendimento e o giro sao CSS — cada bobina tem o mesmo
  * keyframe, defasado por --i.
  */
-function reactorSvg(): string {
+export function reactorSvg(): string {
   const coils = [
     'M52.58 13.09A37 37 0 0 1 69.61 18.62',
     'M73.78 21.66A37 37 0 0 1 84.31 36.14',

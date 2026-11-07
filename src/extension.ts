@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
+import { activateAgents, AgentsArea } from './agents/activate';
 import { Monitor, MonitorConfig } from './engine/monitor';
 import { LiveData } from './engine/types';
-import { LivePanel } from './ui/livePanel';
+import { LivePanel, PanelArea, PanelAreas } from './ui/livePanel';
 import { LiveViewProvider } from './ui/liveView';
 import { StatusBar, StatusBarOptions, StatusKey } from './ui/statusBar';
 
@@ -18,12 +19,21 @@ export function activate(context: vscode.ExtensionContext): void {
     () => syncBusy(),
   );
 
-  const showPanel = (): LivePanel =>
+  // MONITOR | AGENTES no topo do painel, na mesma aba; a área de agentes entra no fim do activate
+  let agents: AgentsArea | undefined;
+  const areas: PanelAreas = {
+    agents: () => agents?.enabled() ?? false,
+    mount: (webview) => agents?.mount(webview) ?? new vscode.Disposable(() => undefined),
+  };
+
+  const showPanel = (area?: PanelArea): LivePanel =>
     LivePanel.show(
       context.extensionUri,
       () => cfg().get<string>('theme', 'escuro'),
       () => pushLast(),
       () => syncBusy(),
+      areas,
+      area,
     );
 
   function pushLast(): void {
@@ -51,7 +61,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
 
     vscode.commands.registerCommand('arcAiMonitor.openPanel', () => {
-      showPanel();
+      showPanel('monitor');
       syncBusy();
     }),
 
@@ -81,6 +91,32 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   monitor.start();
+
+  // área de agentes: módulo à parte, com leitura, views e comandos próprios.
+  // Uma falha nele não pode levar junto o monitor, que já está de pé.
+  try {
+    agents = activateAgents(context, {
+      // o mapa vive no painel do monitor: abrir o mapa é abrir o painel na área de agentes
+      openAgents: () => {
+        showPanel('agents');
+        syncBusy();
+      },
+      theme: () => cfg().get<string>('theme', 'escuro'),
+      // a mesma identidade e a mesma janela de contexto que o monitor mostra
+      head: () => {
+        const d = monitor.last;
+        const a = d?.account;
+        const ident = a && (a.bars || []).length
+          ? 'CLAUDE' + (a.email ? ' · ' + a.email : a.tier ? ' · ' + a.tier.toUpperCase() : '')
+          : '';
+        // a idade conta até agora, não até a última leitura do monitor (que fica mais espaçada sem o painel à vista)
+        const fresh = a ? { source: a.source, ageS: a.fetched_ms ? Math.floor((Date.now() - a.fetched_ms) / 1000) : a.age_s } : null;
+        return { ident, ctxMax: d?.ctx_max || cfg().get<number>('contextWindow', 1_000_000), fresh };
+      },
+    });
+  } catch (e) {
+    console.error('Arc AI Monitor: área de agentes não ativou', e);
+  }
 }
 
 export function deactivate(): void {

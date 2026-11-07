@@ -29,6 +29,39 @@ lateral secundária (direita) — onde ficar melhor.
 - **Histórico** — barras por dia (janela configurável, padrão 30 dias), com a
   média do período tracejada, e rankings por projeto e por modelo.
 
+## Agentes
+
+O topo do painel alterna, na mesma aba, entre **MONITOR** e **AGENTES**. A
+área de agentes é o mapa de quem coordena várias sessões do Claude Code ao
+mesmo tempo:
+
+- **Por repositório**: o checkout principal e cada worktree, com branch,
+  à frente/atrás e arquivos sujos. Worktrees sem sessão ficam numa faixa no
+  fim, com o diagnóstico (já na branch padrão, upstream apagado, sem branch).
+- **Sessões** dentro do worktree em que rodam: título da conversa, ação
+  atual, estado (trabalhando, parada, **aguardando você**), modelo e tokens
+  no contexto.
+- **Subagentes** à direita da sessão que os disparou, com a classe (Batedor,
+  Estrategista, Executor, Revisor) e o que estão fazendo; concluídos e com
+  falha ficam alguns minutos no mapa.
+- **Detalhe da sessão**: abrir a sessão, terminal na pasta, comando de
+  retomada e a conversa recente, com uma caixa de mensagem que chega à
+  sessão como mensagem de outro agente (aprovar permissão continua sendo só
+  na sessão).
+- **Worktrees**: criar, mostrar no Explorer, terminal, sessões anteriores
+  com retomada e remover com segurança (o git recusa arquivo sujo; a branch
+  só sai com pedido e se já estiver mergeada).
+
+Quando uma sessão para esperando você, a barra de status destaca e o VS Code
+avisa. A barra lateral ganha a view **Agentes**, com a lista compacta.
+
+A área acompanha **só o Claude Code**: sem ele na máquina, ela não aparece e
+o monitor fica como antes. Lê `~/.claude/sessions` (o registro das sessões
+vivas que o próprio Claude Code mantém), o fim dos transcripts e o `git` de
+cada worktree. "Abrir sessão" e a caixa de mensagem usam interfaces internas
+do Claude Code, sem documentação pública: podem parar de funcionar quando
+ele mudar.
+
 ## De onde vêm os números
 
 As cotas do **Claude** são os valores **oficiais** — os mesmos do `/usage`. Vêm de
@@ -141,3 +174,7 @@ Keychain** — é esperado, e acontece só uma vez.
 | `arcAiMonitor.contextWindow` | `1000000` | o que conta como 100% na barra de contexto |
 | `arcAiMonitor.theme` | `escuro` | `escuro` = paleta própria; `vscode` = segue o tema do editor |
 | `arcAiMonitor.pricing` | `{}` | sobrescreve a tabela de preços por milhão de tokens |
+| `arcAiMonitorAgents.claudeHome` | `""` | pasta de dados do Claude Code para a área de agentes (vazio = a do monitor) |
+| `arcAiMonitorAgents.notifyWhenWaiting` | `true` | avisa quando uma sessão para esperando você |
+| `arcAiMonitorAgents.refreshSeconds` | `2` | intervalo de releitura das sessões (s) |
+| `arcAiMonitorAgents.recentSubagentMinutes` | `15` | por quanto tempo um subagente concluído ou com falha fica no mapa |

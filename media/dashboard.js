@@ -1336,6 +1336,9 @@
   document.addEventListener('click', (event) => {
     const go = event.target.closest && event.target.closest('[data-go]');
     if (go) pick(go.dataset.go);
+    // MONITOR | AGENTES: a extensão mostra o mapa de agentes nesta mesma área do editor
+    const area = event.target.closest && event.target.closest('[data-area]');
+    if (area) vscode.postMessage({ type: 'area', area: area.dataset.area });
   });
 
   const prev = vscode.getState();

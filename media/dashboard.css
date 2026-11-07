@@ -146,6 +146,8 @@ body {
 #k_cost[hidden],
 .views[hidden] { display: none !important; }
 .top .spacer { flex: 1; }
+/* MONITOR | AGENTES: só no painel; na coluna estreita a área de agentes é a view dela */
+body.compact .areas { display: none; }
 .topmeta {
   display: flex;
   align-items: center;

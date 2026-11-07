@@ -1,0 +1,18 @@
+/* Lista lateral dos agentes: a camada sobre o dashboard.css do monitor, que traz paleta, fontes, tema, o
+   painel (.panel) e o cartão de sessão (.s). Aqui só o que é da lista: a moldura da coluna estreita, o
+   botão do mapa, o cartão como botão e as barrinhas dos subagentes. */
+body { padding: 10px 10px 14px; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; }
+#list { display: flex; flex-direction: column; gap: 8px; }
+/* o botão "Abrir painel" do monitor (.ov-open), na largura da coluna */
+.open { width: 100%; margin-bottom: 8px; padding: 6px 8px; text-align: center; }
+.list { display: flex; flex-direction: column; gap: 8px; }
+.s { width: 100%; transition: background-color .15s; }
+.s:hover { background: color-mix(in srgb, var(--ink) 5%, var(--card)); }
+.open:focus-visible, .s:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+/* aguardando você: trilho e textos em âmbar, como no mapa */
+.s.wait .rail { background: var(--warn); }
+.s.wait .ptxt, .s.wait .idle, .s.wait .meta { color: var(--warn); }
+.subs { display: flex; gap: 3px; margin-top: 6px; }
+.subs span { width: 12px; height: 3px; border-radius: 2px; background: var(--accent); }
+.subs span.done { background: var(--ink-dim); } .subs span.failed { background: var(--crit); }

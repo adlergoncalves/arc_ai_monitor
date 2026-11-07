@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.1.0] - 2026-11-05
+
+### Adicionado
+
+- **Área de agentes.** O topo do painel alterna entre MONITOR e AGENTES na
+  mesma aba. O mapa mostra cada repositório com o checkout principal e os
+  worktrees, as sessões do Claude Code em cada um e os subagentes de cada
+  sessão; o que trabalha, o que parou e o que aguarda você. Detalhe da
+  sessão com a conversa recente e caixa de mensagem; gestão de worktrees
+  (criar, remover com segurança, sessões anteriores e retomada).
+- Aviso e destaque na barra de status quando uma sessão para esperando você.
+- View **Agentes** na barra lateral, ao lado de "Ao vivo".
+- A área só aparece para quem tem o Claude Code; quem usa só o Codex vê o
+  monitor como antes.
+
 ## [1.0.3] - 2026-09-25
 
 ### Adicionado
